@@ -615,7 +615,7 @@
              ekt,ekr,ekm,ekp,stb,srb,spb,smb,ahat
         integer :: i, nr, testindx
         real(kind=8) :: kap1,kap2
-        one=1d0; mone=-one; angmin=-0.99d0; angmax=0.99d0
+        one=1d0; mone=-one; angmin=-0.9999d0; angmax=0.9999d0
         eps=epsilon(eps)
         metric=kerr_metric(r,th,a); tmetric=transpose(metric)
 ! Co-variant metric components
