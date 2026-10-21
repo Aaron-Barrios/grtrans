@@ -8,3 +8,15 @@
 /*.p
 /*~
 /*.pyc
+# Aperture pipeline (Aaron-Barrios/grtrans, branch aperture)
+# per-run files: inputs.in is rewritten by every trace (raytrace_q6 seeds it
+# from inputs.in.default when missing); logs; the test binary
+/inputs.in
+/inputs.in.tmp*
+/*.log
+/test_aperture_model
+# local backups of earlier builds and tables, kept for the comparisons in
+# the project's README ("Emissivity") and verification_scripts/rebuild_check.py
+/grtrans.pre_*
+/jnu_table*pre*
+/fits.f90.cfitsio_orig
