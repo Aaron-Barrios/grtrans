@@ -7,7 +7,6 @@
       use math, only: zbrent
       implicit none
 
-      namelist /thickdisk/  dfile, gfile, nt, nfiles, indf, jonfix, offset, sim, dindf, magcrit
       integer :: nx1, nx2, nx3, ndumps, nt, nfiles, indf, defcoord, &
            jonfix, dlen, offset, &
            header_length, field_header_length, dindf, magcrit
@@ -70,6 +69,7 @@
 !         module procedure get_header_lengths
 !      end interface
 
+      namelist /thickdisk/  dfile, gfile, nt, nfiles, indf, jonfix, offset, sim, dindf, magcrit
       contains
 
         subroutine coord_def

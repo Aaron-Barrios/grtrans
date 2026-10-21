@@ -7,7 +7,6 @@
 
   implicit none
 
-  namelist /hotspot/ rspot, r0spot, n0spot
   
   real :: rspot,r0spot,n0spot,tspot
 
@@ -23,6 +22,7 @@
      module procedure advance_schnittman_hotspot_timestep
   end interface
 
+  namelist /hotspot/ rspot, r0spot, n0spot
   contains
 
     subroutine read_schnittman_hotspot_inputs(ifile)

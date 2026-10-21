@@ -1,10 +1,11 @@
        program call_grtrans
        implicit none
 
+       character(len=300) :: ifile, ofile
+       character(len=40) :: readfile
+
        namelist /files/ ifile, ofile
 
-       character(len=200) :: ifile, ofile
-       character(len=40) :: readfile
        readfile='files.in'
        open(unit=8,file=readfile)
        read(8,nml=files)

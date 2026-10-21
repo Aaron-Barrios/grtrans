@@ -10,7 +10,6 @@
 
   implicit none
 
-  namelist /phatdisk/ nw, wmin, wmax, nfreq_tab, fmin, fmax, rmax, nr, sigt, fcol
   
   real :: fmin,fmax, wmin, wmax, rmax, sigt, fcol
   integer :: nw, nfreq_tab, nr
@@ -25,6 +24,7 @@
      module procedure init_phatdisk
   end interface
 
+  namelist /phatdisk/ nw, wmin, wmax, nfreq_tab, fmin, fmax, rmax, nr, sigt, fcol
   contains
 
     subroutine read_phatdisk_inputs(ifile)

@@ -7,9 +7,8 @@
 
   implicit none
 
-  namelist /thindisk/ mbh, mdot
-  
   real :: mbh, mdot, rin, rout
+
 
   interface thindisk_vals
     module procedure thindisk_vals
@@ -19,6 +18,7 @@
      module procedure init_thindisk
   end interface
 
+  namelist /thindisk/ mbh, mdot
   contains
 
     subroutine read_thindisk_inputs(ifile)

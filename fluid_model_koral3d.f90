@@ -11,7 +11,6 @@
 
       !AC koral will read modified harm .in files for now
       !AC should change to special koral namelist
-      namelist /harm/  dfile, hfile, nt, indf
 
       logical :: doingkoralnth,shortfile
       character(len=100) :: dfile, hfile
@@ -56,6 +55,7 @@
         module procedure koral3d_vals
       end interface
 
+      namelist /harm/  dfile, hfile, nt, indf
       contains
 
         ! transform Boyer-Lindquist theta coordinates to modified Kerr-Schild x2 at a corresponding array of r 

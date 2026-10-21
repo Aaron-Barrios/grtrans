@@ -7,7 +7,6 @@
       use math, only: zbrent
       implicit none
 
-      namelist /harm/  dfile, hfile, nt, indf, gfile
 
       character(len=100) :: dfile, hfile, gfile
       integer :: n, ndumps, nt, indf, dlen, nhead
@@ -67,6 +66,7 @@
          module procedure findx2iharm_array
       end interface
 
+      namelist /harm/  dfile, hfile, nt, indf, gfile
       contains
 
         function findx2iharm(x2,args) result(diff)

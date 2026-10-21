@@ -7,7 +7,6 @@
       use math, only: zbrent
       implicit none
 
-      namelist /harm/  dfile, hfile, nt, indf
 
       character(len=40) :: dfile, hfile
       integer :: nx1, nx2, n, ndumps, nt, indf, dlen, nhead
@@ -44,6 +43,7 @@
         module procedure harm_vals
       end interface
 
+      namelist /harm/  dfile, hfile, nt, indf
       contains
 
         function findx2harm(x2,args) result(diff)

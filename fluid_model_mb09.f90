@@ -7,7 +7,6 @@
       use math, only: zbrent
       implicit none
 
-      namelist /mb09/  dfile, gfile, nt, nfiles, indf, jonfix, offset, sim
       integer :: nx1, nx2, nx3, ndumps, nt, nfiles, indf, defcoord, &
            jonfix, dlen, offset, header_length, field_header_length
       character(len=100) :: dfile, gfile
@@ -64,6 +63,7 @@
          module procedure calcrmks_single
       end interface
 
+      namelist /mb09/  dfile, gfile, nt, nfiles, indf, jonfix, offset, sim
       contains
 
         function calcrmks(x1,xbr) result(r)

@@ -11,7 +11,6 @@
 
       !AC koral will read modified harm .in files for now
       !AC should change to koral namelist
-      namelist /harm/  dfile, hfile, nt, indf
 
       logical :: doingkoralnth
       character(len=100) :: dfile, hfile
@@ -59,6 +58,7 @@
         module procedure koral_vals
       end interface
 
+      namelist /harm/  dfile, hfile, nt, indf
       contains
 
         subroutine transformbl2mksh3(th,r,x2,h,a,b,p)

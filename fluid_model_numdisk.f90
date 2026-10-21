@@ -6,7 +6,6 @@
 !      use kerr, only: kerr_metric, lnrf_frame
       implicit none
 
-      namelist /numdisk/  dfile,tscl,rscl
 
       character(len=40) :: dfile
       integer :: nr, nphi
@@ -40,6 +39,7 @@
         module procedure numdisk_vals
       end interface
 
+      namelist /numdisk/  dfile,tscl,rscl
       contains
 
         subroutine numdisk_vals(r,phi,a,T,omega)

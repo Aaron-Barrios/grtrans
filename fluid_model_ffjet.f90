@@ -5,7 +5,6 @@
       use kerr, only: kerr_metric, lnrf_frame
       implicit none
 
-      namelist /ffjet/  dfile
 
       character(len=40) :: dfile
       real, dimension(:), allocatable :: rc_arr, thc_arr, phc_arr
@@ -37,6 +36,7 @@
         module procedure ffjet_vals
       end interface
 
+      namelist /ffjet/  dfile
       contains
 
         subroutine ffjet_vals(x0,a,rho,p,b,u,bmag)

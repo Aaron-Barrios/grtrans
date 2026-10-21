@@ -7,7 +7,6 @@
 
   implicit none
 
-  namelist /hotspot/ rspot, r0spot, n0spot, bl06
   
   real :: rspot,r0spot,n0spot,tspot
   integer :: bl06
@@ -24,6 +23,7 @@
      module procedure advance_hotspot_timestep
   end interface
 
+  namelist /hotspot/ rspot, r0spot, n0spot, bl06
   contains
 
     subroutine read_hotspot_inputs(ifile)
