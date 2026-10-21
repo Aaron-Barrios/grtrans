@@ -20,7 +20,9 @@
            
              use omp_lib
        !       use grtrans_inputs
-             use grtrans, only: grtrans_driver
+             use grtrans, only: grtrans_driver, nan_rays, init_refine_stats, &
+                  write_refine_stats
+             use grtrans_inputs, only: refine_on
              use ray_trace, only: ray_set, initialize_raytrace_camera, &
                   kwrite_raytrace_camera, del_raytrace_camera
              use fluid_model, only: load_fluid_model, unload_fluid_model, &
@@ -30,6 +32,7 @@
              use geodesics, only: initialize_pixels, geokerr_args, &
                   del_geokerr_args,initialize_geokerr_args, initialize_geo_tabs
              use chandra_tab24, only: load_chandra_tab24, del_chandra_tab24
+             use fluid_model_aperture, only: naperture
 
 !INPUTS=====================
             integer, intent(in) :: standard,nrotype,nvals,nfreq,nmu,cflag,nt, &
@@ -107,7 +110,9 @@
             !replace read_inputs with actual inputs
             if(extra==1) then
                if (nup.gt.1) then
-                  nextra=19
+! 21 = 19 stock slots + (20) emission-weighted plasma beta + (21) sigma.
+! MUST match nextra in rad_trans.f90 (which sizes r%tau).
+                  nextra=21
                else
                   nextra=7
                endif
@@ -159,8 +164,22 @@
             fnw,fnfreq_tab,fnr,foffset,fdindf,fmagcrit,frspot,fr0spot,fn0spot,ftscl,frscl, &
             fwmin,fwmax,ffmin,ffmax,frmax,fsigt,ffcol,fmdot,mbh,fnscl,fnnthscl,fnnthp,fbeta, &
             fbl06,fnp,ftp,frin,frout,fthin,fthout,fphiin,fphiout,fscalefac,sigcut)
+            ! refinement statistics (refine.out) for both the standalone program
+            ! and the f2py pgrtrans path (before 2026-10-15 only the former;
+            ! docs/muchado.md, L8-F12), and the count of rays with a NaN
+            ! emissivity (L8-G4)
+            if (refine_on) call init_refine_stats(i2)
+            nan_rays = 0
             write(6,*) 'load fluid model ',fname,spin
             call load_fluid_model(fname,spin,fargs)
+            ! several APERTURE binaries (fdfile = a '.lst' file): binary m is
+            ! traced into the cameras of model parameter m, so nmdot must equal
+            ! their number (mdot itself is not used by APERTURE)
+            if (fname=='APERTURE' .and. naperture>1 .and. nparams/=naperture) then
+               write(6,'(a,i0,a,i0,a)') ' ERROR: ', naperture, ' APERTURE binaries listed in fdfile but nmdot = ', &
+                    nparams, '; set nmdot to the number of binaries'
+               stop 1
+            endif
 
             if(nup.eq.1.and.nvals.eq.4) call load_chandra_tab24()
             write(6,*) 'mu loop: ',nro,nphi,nup,standard,nmu
@@ -195,7 +214,7 @@
                wtime = omp_get_wtime()
                do l=1,nt
                   !       write(6,*) 'pre loop spin: ',spin,gargs%a
-!$omp parallel do schedule(static,1) private(i) shared(gargs,gunit,c,j,nt,l,spin, &
+!$omp parallel do schedule(guided) private(i) shared(gargs,gunit,c,j,nt,l,spin, &
 !$omp& iname,ename,fname,sparams,eparams,nfreq,nparams,freqs,nup,i1,i2,extra,debug)
                   do i=i1,i2
 !                     write(6,*) 'i: ',i,iname,ename
@@ -211,12 +230,16 @@
                   if(l.lt.nt) call advance_fluid_timestep(fname,dt)
                enddo
                write(6,*) 'grtrans wall time elapsed: ', omp_get_wtime() - wtime
+               if (nan_rays > 0) write(6,'(a,i0,a)') ' WARNING: ', nan_rays, &
+                    ' ray(s) had a NaN emissivity: pixels set to 0, NaN samples' // &
+                    ' counted in extra slot 2 (with extra=1)'
                spin=gargs%a
                call del_geokerr_args(gargs)
                !       write(6,*) 'spin after: ',spin
                !          call advance_fluid_timestep(fname,dt)
             enddo
             if(nup.eq.1.and.nvals.eq.4) call del_chandra_tab24()
+            if (refine_on) call write_refine_stats('refine.out')
             write(6,*) 'Write camera', nvals, nextra
             allocate(ivals(nvals+nextra,nro*nphi,NCAMS))
             ivals(:,:,:)=0d0

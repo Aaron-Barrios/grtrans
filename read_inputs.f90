@@ -4,20 +4,6 @@
 !      use strings, only: countsubstring
 
       implicit none
-
-      namelist /geodata/   standard,mumin,mumax,nmu,phi0,spin, uout,uin, rcut, &
-       nrotype, gridvals, nn, i1, i2, extra, debug
-      namelist /fluiddata/ fname, dt, nt, nload, nmdot, mdotmin, mdotmax, sigcut
-      namelist /emisdata/  ename, mbh, nfreq, fmin, fmax, muval, gmin, gmax, p1, p2, jetalpha, &
-           stype, delta, nweights, coefindx
-      namelist /general/   use_geokerr, nvals, iname, cflag
-! namelists for fluid models
-! AC koral will share same structure as harm...
-      namelist /harm/  fdfile, fgfile, fhfile, fnt, fnfiles, findf, fjonfix, &
-           foffset, fsim, fdindf, fmagcrit, fscalefac
-      namelist /analytic/ fnw, fwmin, fwmax, fnfreq_tab, ffmin, ffmax, frmax, fnr, fsigt, ffcol, &
-           frspot,fr0spot,fn0spot,ftscl,frscl,fmdot,fnscl,fnnthscl,fnnthp,fbeta,fbl06,fnp,ftp, &
-           frin,frout,fthin,fthout,fphiin,fphiout
       
       integer :: standard,nrotype,nro,nphi,nup,nvals,nfreq,nmu,cflag, nt,nmdot, &
            nload,extra,i1,i2,debug
@@ -38,6 +24,32 @@
            ffmax,frmax,fsigt,ffcol,fmdot,fnscl,fnnthscl,fnnthp,fbeta,fnp,ftp, &
            frin,frout,fthin,fthout,fphiin,fphiout,fscalefac
       real(kind=8), dimension(:), allocatable :: epotherargs
+      ! Adaptive ray refinement (grtrans_driver.f90, refine_ray; RT_background.tex,
+      ! "How to resolve the rays").  Off by default; the optional &refine
+      ! namelist in inputs.in switches it on and sets the accuracy target
+      ! (refine_rtol, refine_atol_frac), the region worth refining
+      ! (refine_tau_cut) and the hard caps (refine_max_depth bisections of each
+      ! original interval, refine_max_points points per ray and frequency).
+      logical :: refine_on=.false.
+      real(kind=8) :: refine_rtol=1d-2, refine_atol_frac=1d-3, refine_tau_cut=20d0
+      integer :: refine_max_depth=6, refine_max_points=2000
+
+      namelist /geodata/   standard,mumin,mumax,nmu,phi0,spin, uout,uin, rcut, &
+       nrotype, gridvals, nn, i1, i2, extra, debug
+      namelist /fluiddata/ fname, dt, nt, nload, nmdot, mdotmin, mdotmax, sigcut
+      namelist /emisdata/  ename, mbh, nfreq, fmin, fmax, muval, gmin, gmax, p1, p2, jetalpha, &
+           stype, delta, nweights, coefindx
+      namelist /general/   use_geokerr, nvals, iname, cflag
+      namelist /refine/    refine_on, refine_rtol, refine_atol_frac, refine_tau_cut, &
+           refine_max_depth, refine_max_points
+! namelists for fluid models
+! AC koral will share same structure as harm...
+      namelist /harm/  fdfile, fgfile, fhfile, fnt, fnfiles, findf, fjonfix, &
+           foffset, fsim, fdindf, fmagcrit, fscalefac
+      namelist /analytic/ fnw, fwmin, fwmax, fnfreq_tab, ffmin, ffmax, frmax, fnr, fsigt, ffcol, &
+           frspot,fr0spot,fn0spot,ftscl,frscl,fmdot,fnscl,fnnthscl,fnnthp,fbeta,fbl06,fnp,ftp, &
+           frin,frout,fthin,fthout,fphiin,fphiout
+
       interface read_inputs
         module procedure read_inputs
       end interface
@@ -57,6 +69,13 @@
           read(8,nml=general)
           read(8,nml=harm)
           read(8,nml=analytic)
+          ! &refine is optional: without it the defaults above (off) apply.
+          rewind(8)
+          read(8,nml=refine,iostat=i)
+          if (i > 0) then
+             write(6,*) 'ERROR: cannot parse the &refine namelist in ', trim(file)
+             stop 1
+          endif
 !          write(6,*) 'general: ',iname
           close(unit=8)
           a1=dble(gridvals(1))

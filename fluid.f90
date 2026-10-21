@@ -19,6 +19,8 @@
            advance_schnittman_hotspot_timestep, schnittman_hotspot_vals
       use fluid_model_harm, only: initialize_harm_model, del_harm_data, harm_vals, &
            advance_harm_timestep
+      use fluid_model_aperture, only: initialize_aperture_model, del_aperture_data, &
+           aperture_vals, aperture_lambda_u, aperture_mass_ratio
       use fluid_model_harm3d, only: initialize_harm3d_model, del_harm3d_data, harm3d_vals, &
           advance_harm3d_timestep
       use fluid_model_harmpi, only: initialize_harmpi_model, del_harmpi_data, harmpi_vals, &
@@ -40,7 +42,7 @@
       integer, parameter :: DUMMY=0,SPHACC=1,THINDISK=2,RIAF=3,HOTSPOT=4,PHATDISK=5,SCHNITTMAN=6
       integer, parameter :: COSMOS=10,MB=11,HARM=12,FFJET=13,NUMDISK=14,THICKDISK=15,MB09=16
       integer, parameter :: SARIAF=17,POWERLAW=18,HARM3D=19,HARMPI=20,TOY=21,KORAL=22,KORALNTH=23, &
-           SHELL=24,KORAL3D=25,KORAL3D_DISK=26,KORAL3D_TOPJET=27,KORAL3D_BOTJET=28,IHARM=29
+           SHELL=24,KORAL3D=25,KORAL3D_DISK=26,KORAL3D_TOPJET=27,KORAL3D_BOTJET=28,IHARM=29,APERTURE=30
 
       integer :: nrelbin=0
       real :: bingammamin=1., bingammamax=1.
@@ -198,6 +200,8 @@
             call initialize_harmpi_model(a,ifile,fargs%dfile,fargs%hfile,fargs%gfile,fargs%nt,fargs%indf)
         elseif(fname=='IHARM') then
             call initialize_iharm_model(a,ifile,fargs%dfile,fargs%hfile,fargs%gfile,fargs%nt,fargs%indf)
+        elseif(fname=='APERTURE') then
+            call initialize_aperture_model(a,fargs%dfile)
         elseif(fname=='KORAL') then
             write(6,*) 'dfile: ',fargs%dfile
             call initialize_koral_model(a,ifile,.false.,fargs%dfile,fargs%hfile,fargs%nt,fargs%indf, & 
@@ -321,6 +325,11 @@
               elseif(fname=='IHARM') then
                  f%model=IHARM
                  allocate(f%kela(nup))
+              elseif(fname=='APERTURE') then
+                 f%model=APERTURE
+                 ! rho2 carries the pipeline's beta_p and Be its sigma
+                 ! (fluid_model_aperture; Be is otherwise KORAL's)
+                 allocate(f%rho2(nup)); allocate(f%Be(nup))
               elseif(fname=='THICKDISK') then
                  f%model=THICKDISK
               elseif(fname=='MB09') then
@@ -390,6 +399,8 @@
            call del_harmpi_data()
         elseif(fname=='IHARM') then
            call del_iharm_data()
+        elseif(fname=='APERTURE') then
+           call del_aperture_data()
         elseif(fname=='THICKDISK') then
            call del_thickdisk_data()
         elseif(fname=='MB09') then
@@ -436,7 +447,8 @@
               deallocate(f%p)
               deallocate(f%bmag)
            endif
-           if(f%model==SARIAF.or.f%model==POWERLAW) deallocate(f%rho2)
+           if(f%model==SARIAF.or.f%model==POWERLAW.or.f%model==APERTURE) deallocate(f%rho2)
+           if(f%model==APERTURE) deallocate(f%Be)
            if(f%model==KORALNTH) deallocate(f%nnth)
            if(f%model==HARMPI) then
               deallocate(f%kela); deallocate(f%kelb)
@@ -499,6 +511,8 @@
              call get_harmpi_fluidvars(x0,real(a),f)
           CASE (IHARM)
              call get_iharm_fluidvars(x0,real(a),f)
+          CASE (APERTURE)
+             call get_aperture_fluidvars(x0,real(a),f)
           CASE (THICKDISK)
              call get_thickdisk_fluidvars(x0,real(a),f)
           CASE (MB09)
@@ -556,6 +570,8 @@
              call convert_fluidvars_harmpi(f,ncgs,ncgsnth,bcgs,tcgs,sp)
           CASE (IHARM)
              call convert_fluidvars_iharm(f,ncgs,ncgsnth,bcgs,tcgs,sp)
+          CASE (APERTURE)
+             call convert_fluidvars_aperture(f,ncgs,ncgsnth,bcgs,tcgs,sp)
           CASE (THICKDISK)
              call convert_fluidvars_thickdisk(f,ncgs,ncgsnth,bcgs,tcgs,sp)
           CASE (MB09)
@@ -695,6 +711,14 @@
         call harm_vals(x0,a,f%rho,f%p,f%b,f%u,f%bmag)
 !        write(6,*) 'harm u: ',f%u*f%u, f%b*f%b
         end subroutine get_harm_fluidvars
+
+        subroutine get_aperture_fluidvars(x0,a,f)
+        type (four_Vector), intent(in), dimension(:) :: x0
+        real, intent(in) :: a
+        type (fluid), intent(inout) :: f
+        ! Aperture: f%rho carries n_e (code), f%p carries theta_e (dimensionless).
+        call aperture_vals(x0,a,f%rho,f%p,f%b,f%u,f%bmag,f%rho2,f%Be)
+        end subroutine get_aperture_fluidvars
 
         subroutine get_harm3d_fluidvars(x0,a,f)
         type (four_Vector), intent(in), dimension(:) :: x0
@@ -971,6 +995,45 @@
         tempcgs = tempcgs*trat
         ncgsnth=ncgs
         end subroutine convert_fluidvars_harm
+
+        subroutine convert_fluidvars_aperture(f,ncgs,ncgsnth,bcgs,tempcgs,sp)
+        ! Aperture code->CGS.  The PIC run fixes only dimensionless ratios
+        ! (sigma, beta_p, Theta_e), so there is exactly ONE free physical scale:
+        ! lambda_u, the number of cm^-3 per code density unit, fixed once per
+        ! run (not per snapshot) by physical_scale.py: the densest valid cell of
+        ! the run's first dump, in the electrons' rest frame (max n_e_rest), is
+        ! given NE0 (1e6 cm^-3).  It arrives in the binary's header
+        ! (aperture_lambda_u, fluid_model_aperture.f90), so nothing here is
+        ! specific to one run.  r_g, G and M_sun do not enter it.  The field is NOT scaled independently: Aperture
+        ! uses Heaviside-Lorentz code units (dD/dt = curl H - J, no 4 pi) with
+        ! |q| = m = q_e = 1, so code b^2/2 and rho c^2 share one energy unit,
+        ! and holding b^2/(rho c^2) fixed (twice the project's sigma =
+        ! U_B/(rho_0 c^2) = b^2/(2 rho_0); any fixed ratio gives the same
+        ! scaling) gives
+        !   n_e [cm^-3] = n_e_code * lambda_u
+        !   B   [G]     = bmag_code * sqrt(4 pi lambda_u m c^2),  m = mass_ratio m_e
+        ! with the code particle mass m from the header (aperture_mass_ratio:
+        ! 1 for the pair-plasma reading, m_p/m_e when the run is relabelled)
+        ! (the sqrt(4 pi) converts Heaviside-Lorentz to Gaussian).  This keeps
+        ! the simulation's sigma and beta_p in every cell; B is not scaled
+        ! independently of n_e.
+        !   f%p   carries theta_e (dimensionless); passed through in tempcgs
+        !         so the emission model reads it directly (NOT Kelvin).
+        ! sp%sigcut (&fluiddata sigcut) is inert here: andrew_sigcut is not
+        ! called for APERTURE.  The only sigma cut is the pipeline's
+        ! TRACE_SIGMA_CUT, applied by the writer per cell (APL7) or by
+        ! aperture_vals per sample with the value in the binary (APL8).
+        type (fluid), intent(in) :: f
+        type (source_params), intent(in) :: sp
+        real(kind=8), dimension(size(f%rho)), intent(out) :: ncgs,ncgsnth,bcgs,tempcgs
+        ! aperture_lambda_u() and aperture_mass_ratio(): those of the binary the
+        ! calling thread traces (select_aperture_binary; the only one unless
+        ! fdfile lists several)
+        ncgs = f%rho * aperture_lambda_u()
+        ncgsnth = 0d0
+        bcgs = f%bmag * sqrt(4d0*pi*aperture_lambda_u()*aperture_mass_ratio()*m*c2)
+        tempcgs = f%p
+        end subroutine convert_fluidvars_aperture
 
         subroutine convert_fluidvars_harm3d(f,ncgs,ncgsnth,bcgs,tempcgs,sp)
         type (fluid), intent(in) :: f

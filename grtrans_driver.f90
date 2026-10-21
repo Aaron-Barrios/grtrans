@@ -5,7 +5,7 @@
 
        use fluid_model, only: initialize_fluid_model, del_fluid_model, &
         get_fluid_vars, fluid, source_params, convert_fluid_vars, &
-        initialize_source_params,del_source_params
+        initialize_source_params,del_source_params, APERTURE
        use class_rad_trans, only: initialize_rad_trans, del_rad_trans, &
         rad_trans 
        use geodesics, only: initialize_geodesic, del_geodesic, &
@@ -13,13 +13,17 @@
        use emissivity
        use ray_trace, only: save_raytrace_camera_pixel, ray_set
 !       use interpolate, only: get_weight, locate
-       use phys_constants, only: GC => G, EC => E, CC => C, C2, MSUN
+       use phys_constants, only: GC => G, EC => E, CC => C, C2, MSUN, &
+            ME => m, KB => k, PI => pi
        use kerr, only: comoving_ortho, calc_polar_psi, calc_kb_ang, calcg, lnrf_frame, &
-            comoving_ortho_debug
+            comoving_ortho_debug, kerr_metric, calc_nullp
+       use class_four_vector, only: four_vector, assign_metric
+       use grtrans_inputs, only: refine_on, refine_rtol, refine_atol_frac, &
+            refine_tau_cut, refine_max_depth, refine_max_points
        use chandra_tab24, only: interp_chandra_tab24
        use radtrans_integrate, only: integrate, del_radtrans_integrate_data, &
             init_radtrans_integrate_data, intensity
-       use math, only: tsum
+       use fluid_model_aperture, only: naperture, select_aperture_binary
 
        implicit none
 
@@ -39,6 +43,17 @@
 !         type (emis_params) :: eparams
 !         type (source_params) :: sparams
 !$omp threadprivate(f,r,g,e,EXTRA_QUANTS,WRITE_GEO,LBH,MBH)
+! Adaptive ray refinement bookkeeping (refine_ray), indexed by ray number i and
+! shared between threads (each ray belongs to one thread): points added, summed
+! over frequencies and cameras, and a flag with bit 1 = an interval was still
+! unconverged after refine_max_depth bisections, bit 2 = refine_max_points ran
+! out.  Allocated by init_refine_stats only when refine_on.
+       integer, dimension(:), allocatable :: refine_added, refine_flag
+! Rays whose emissivity had a NaN somewhere (shared, incremented atomically by
+! grtrans_driver; reset and reported by grtrans_main, pgrtrans.f90).  Such a
+! ray's fac is NaN, so its pixel and extras are stored as 0, except extra
+! slot 2 (docs/muchado.md, L8-G4).
+       integer :: nan_rays = 0
 
 !       interface grtrans_driver_jac_form
 !         module procedure grtrans_driver_jac_form
@@ -70,12 +85,18 @@
          character(len=100), intent(in) :: iname,fname,ename
          real(kind=8) :: fac
          real(kind=8), dimension(:), allocatable :: s2xi,c2xi,s2psi,c2psi, &
-          rshift,ang,nu,cosne,tau,tau_temp,intvals,dummy,vrl,vtl,vpl,cosne2, &
-         aat,aar,aath,aaph,kht,khr,khth,khph,bht,bhr,bhth,bhph,dlp
+          rshift,ang,nu,cosne,tau,tau_temp,dummy,vrl,vtl,vpl,cosne2, &
+         aat,aar,aath,aaph,kht,khr,khth,khph,bht,bhr,bhth,bhph,dlp,subw
          real(kind=8), dimension(:,:), allocatable :: aahat
          real(kind=8), dimension(:,:), allocatable :: tau_arr
-         integer :: k,npow,status,j,nf,nitems,m,kk,taudex,ii,nvals
+         integer :: k,npow,status,j,nf,nitems,m,kk,taudex,ii,nvals,nnan
+         ! the one-pass extra outputs (slots 7-14, 20, 21)
+         integer :: np_
+         real(kind=8) :: acc(0:10), wgt, b2one, q20, q21
          integer, dimension(:), allocatable :: inds
+         ! several APERTURE binaries in one run (fdfile = a '.lst' file,
+         ! fluid_model_aperture): binary m fills the cameras of parameter m
+         logical :: multibin
          npow=3; j=0; status=0; k=0
          ep=eparams
          if(extra==1) EXTRA_QUANTS=1
@@ -122,6 +143,8 @@
             call initialize_fluid_model(f,fname,gargs%a,g%npts)
             call select_emissivity_values(e,ename)
 !         write(6,*) 'evals: ',e%nk,e%neq
+            multibin = (f%model==APERTURE .and. naperture>1)
+            if (multibin) call select_aperture_binary(1)
             ! Get fluid variables:
             call get_fluid_vars(g%x,g%k,g%gk%a,f)
             !write(6,*) 'fluid model: '!,f%rho
@@ -129,9 +152,28 @@
                  g%gk%alpha(1),g%gk%beta(1),g%gk%mu0,f%u,f%b,g%k,s2xi,c2xi, &
                  ang,rshift,cosne)
             !write(6,*) 'comoving ortho grtrans driver: '!,s2xi,c2xi,'\n'
+            ! an emissivity with one Stokes component cannot fill nvals = 4
+            ! (e.g. JNUTABLE: e%j would be read as four columns in integrate)
+            if (e%neq==1 .and. c(1)%nvals==4) then
+               write(6,*) 'ERROR: emissivity ', trim(ename), ' gives Stokes I only;', &
+                    ' set nvals=1 in inputs.in'
+               stop 1
+            endif
             call initialize_rad_trans(r,iname,g%npts,c(1)%nvals,extra)
             call init_radtrans_integrate_data(r%iflag,r%neq,g%npts,r%npts)
             do m=1,nparams
+! Several APERTURE binaries: everything after the geodesic depends on the
+! binary, so the fluid at the samples and the comoving frame are redone for
+! binary m (m=1 was done above) along the same geodesic g; the rest of this
+! loop is then exactly a single-binary trace of binary m.
+               if (multibin .and. m>1) then
+                  call select_aperture_binary(m)
+                  call get_fluid_vars(g%x,g%k,g%gk%a,f)
+                  s2xi=0d0; c2xi=0d0
+                  call comoving_ortho(g%x%data(2),g%x%data(3),g%gk%a, &
+                       g%gk%alpha(1),g%gk%beta(1),g%gk%mu0,f%u,f%b,g%k,s2xi,c2xi, &
+                       ang,rshift,cosne)
+               endif
                sp=sparams(m)
                !write(6,*) 'grtrans_driver sp: ',sp%nfac,sp%gminval
                call initialize_source_params(sp,g%npts)
@@ -157,8 +199,11 @@
                do k=1,NFREQ
                   nu=FREQS(k)/rshift
                   call calc_emissivity(nu,e,ep)
-                  if(any(isnan(e%j))) then
+                  nnan=count(isnan(e%j(:,1)))
+                  if(nnan > 0) then
                      write(6,*) 'NaN in emissivity at i: ',i
+!$omp atomic update
+                     nan_rays=nan_rays+1
                   endif
 
 !                  if(any(isnan(e%K))) then
@@ -226,27 +271,48 @@
 !                        write(6,*) 'integrate: ',g%npts,r%neq,r%npts,r%I(1,r%npts)
 ! added factor of LBH for cgs intensity units ergs / cm^2 / s / Hz / ster
                         r%I=r%I*fac*LBH
+! Adaptive ray refinement (off by default; &refine in inputs.in): resample the
+! ray where it is under-resolved and replace the explin intensity.
+                        if (refine_on .and. r%iflag==4 .and. r%neq==1) &
+                             call refine_ray(i,freqs(k),sparams(m),eparams,fac, &
+                             fname,ename,rshift)
 !                        write(6,*) 'grtrans driver extra quants: ',EXTRA_QUANTS,r%npts
                         if (EXTRA_QUANTS==1) then
 !                           if(r%npts.gt.1) then
                            allocate(tau_arr(g%npts,6))
-                           allocate(tau_temp(g%npts)); allocate(intvals(g%npts))
+                           allocate(tau_temp(g%npts))
                            allocate(dummy(g%npts)); allocate(inds(6)); allocate(dlp(r%npts-1))
                            inds=(/1,2,3,4,5,7/)
 !                           write(6,*) 'tau_arr', size(g%lambda), size(tau_temp)
+! Slots 2-6 are the optical depths of the polarized coefficients (K columns
+! 2,3,4,5,7).  With nvals=1, e%K has a single column, so those optical depths
+! are set to zero rather than read past the end of e%K.
                            do ii=1,6
+                              if (inds(ii) > size(e%K,2)) then
+                                 tau_arr(:,ii)=0d0
+                                 cycle
+                              endif
                               call calc_opt_depth(g%lambda(1)-g%lambda(1:g%npts),e,tau_temp,inds(ii))
 !                              write(6,*) 'extra after opt_depth ',ii, &
 !                                   size(tau_arr,1), size(tau_arr,2), size(tau_temp)
                               tau_arr(:,ii)=tau_temp
                            enddo
                            ! now calculate photosphere location, values there:
+                           ! tau is now the running optical depth from the camera
+                           ! (calc_opt_depth); the ray is optically thin, and the
+                           ! whole ray counts, when its total tau is below 1.
+                           ! (Was minval(tau), which is always 0 for a running
+                           ! integral.)
                            taudex=minloc(abs(tau-1d0),1)
-                           if(minval(tau).lt.1d0) taudex=g%npts
+                           if(maxval(tau).lt.1d0) taudex=g%npts
                            if(taudex.eq.1) taudex=2
 !                           write(6,*) 'taudex: ',taudex,tau(1),tau(g%npts),tau(taudex)
 !                           write(6,*) 'ej: ',e%j(:,1), fac, r%I, tau
                            r%tau(1:6)=tau_arr(taudex,:)
+                           ! slot 1 = TOTAL optical depth of the ray in Stokes I
+                           ! (turnover_frequency.py reads it); slots 2-6 keep the
+                           ! stock values at the photosphere taudex.
+                           r%tau(1)=tau_arr(g%npts,1)
 !                           write(6,*) 'rtau',size(r%tau(1:6)),size(tau_arr(taudex,:))
                            ! now do emissivity-weighted ray averages of other quantities
                            dummy=e%j(:,1)*exp(-tau(1:g%npts))
@@ -260,33 +326,81 @@
 !                           write(6,*) 'rtau', size(r%tau),size(r%tau(7:7))
 !                           write(6,*) 'tsum: ',tsum(g%lambda(1:taudex),dummy(1:taudex))
 !                           write(6,*) 'tsum: ',tsum(g%lambda(1:taudex),dummy(1:taudex)*g%x(1:taudex)%data(2))
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*g%x%data(2))
-!                           write(6,*) 'intvals 1: ',intvals,tsum(g%lambda,dummy),tsum(g%lambda,dummy*g%x%data(2))
-!                           write(6,*) 'g lambda: ',g%lambda(1:g%npts),g%npts
-                           r%tau(7)=intvals(taudex)
-!                           write(6,*) '7'
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*g%x%data(3))
-                           r%tau(8)=intvals(taudex)
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*g%x%data(4))
-                           r%tau(9)=intvals(taudex)
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*e%ncgs)
-                           r%tau(10)=intvals(taudex)
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*e%tcgs)
-                           r%tau(11)=intvals(taudex)
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*e%bcgs)
-                           r%tau(12)=intvals(taudex)
-! this one is \beta...
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*f%p*2./f%bmag**2.)
-                           r%tau(13)=intvals(taudex)
-! new ones added for fraction of emission produced above/below midplane (e.g. counter-jet or forward jet images), and weighted r,th,\tau_FR,\tau_FC for LP
-                           intvals=1d0/tsum(g%lambda,dummy)*tsum(g%lambda,dummy*sign(1d0,cos(g%x%data(3))))
-                           r%tau(14)=intvals(taudex)
-                           r%tau(15)=sum(dlp*g%x(1:r%npts-1)%data(2))/sum(dlp)
-                           r%tau(16)=sum(dlp*g%x(1:r%npts-1)%data(3))/sum(dlp)
-                           r%tau(17)=sum(dlp*tau_arr(1:r%npts-1,5))/sum(dlp)
-                           r%tau(18)=sum(dlp*tau_arr(1:r%npts-1,6))/sum(dlp)
-                           r%tau(19)=sum(dlp*sign(1d0,cos(g%x(1:r%npts-1)%data(3))))/sum(dlp)
-                           deallocate(tau_arr); deallocate(tau_temp); deallocate(intvals); deallocate(dummy)
+! Slots 7-14 and 20-21 in ONE pass over the ray (2026-10-17, docs/history.tex,
+! Stage 62).  Each slot is <q> = int(w q dlambda) / int(w dlambda) with the
+! weight w = j exp(-tau); the trapezoid rule makes either integral
+! sum_i c_i y_i with c_i half the sum of the two neighboring steps of lambda,
+! so one loop accumulates all the numerators and the denominator.  Until then
+! each slot called tsum (math.f90) on its own temporary arrays, about a dozen
+! passes per ray, which cost several times the transfer itself.  The ratio is
+! the same quantity (the sign of the decreasing lambda cancels; only the
+! summation order differs), and the per-point expressions are those of the
+! old code, single-precision fluid fields included.  A ray whose weight
+! integrates to 0 (e.g. exp(-tau) underflowing wherever j > 0) still gets 0 in
+! all of them rather than 0/0 (docs/muchado.md, L8-G8).
+! Slots 20-21 (APERTURE): the PIPELINE's beta_p (f%rho2) and sigma (f%Be),
+! carried in the binary (relabel.beta_p; b^2/(2 rho_0) of the pair fluid);
+! grtrans's own 4 n_e theta_e/b^2 and b_e^2/(4 n_e_rest) are not those once
+! the temperature is relabeled.  For other models the stock beta and
+! sigma, masked as before (b^2 > 0, rho > 0, floored at 0) because bilinear
+! interpolation can undershoot below zero at the torus edge.
+                           allocate(subw(g%npts))
+                           np_=g%npts
+                           subw=0d0          ! here: the trapezoid weights c_i
+                           if (np_ > 1) then
+                              subw(1:np_-1)=subw(1:np_-1)+0.5d0*(g%lambda(2:np_)-g%lambda(1:np_-1))
+                              subw(2:np_)=subw(2:np_)+0.5d0*(g%lambda(2:np_)-g%lambda(1:np_-1))
+                           endif
+                           acc=0d0
+                           do ii=1,np_
+                              wgt=subw(ii)*dummy(ii)
+                              acc(0)=acc(0)+wgt
+                              acc(1)=acc(1)+wgt*g%x(ii)%data(2)
+                              acc(2)=acc(2)+wgt*g%x(ii)%data(3)
+                              acc(3)=acc(3)+wgt*g%x(ii)%data(4)
+                              acc(4)=acc(4)+wgt*e%ncgs(ii)
+                              acc(5)=acc(5)+wgt*e%tcgs(ii)
+                              acc(6)=acc(6)+wgt*e%bcgs(ii)
+! slot 13 is \beta (the stock 2p/b^2)
+                              acc(7)=acc(7)+subw(ii)*(dummy(ii)*f%p(ii)*2./f%bmag(ii)**2.)
+! slot 14: fraction of emission produced above/below the midplane (e.g. counter-jet or forward jet images)
+                              acc(8)=acc(8)+wgt*sign(1d0,cos(g%x(ii)%data(3)))
+                              b2one=max(f%bmag(ii)**2., 0d0)
+                              if (f%model==APERTURE) then
+                                 q20=max(dble(f%rho2(ii)),0d0)
+                                 q21=max(dble(f%Be(ii)),0d0)
+                              else
+                                 q20=0d0
+                                 if (b2one > 0d0) q20=4d0*max(f%rho(ii),0d0)*max(f%p(ii),0d0)/b2one
+                                 q21=0d0
+                                 if (f%rho(ii) > 0d0) q21=b2one/(4d0*f%rho(ii))
+                              endif
+                              acc(9)=acc(9)+wgt*q20
+                              acc(10)=acc(10)+wgt*q21
+                           enddo
+                           if (abs(acc(0)) > 0d0) then
+                              r%tau(7:14)=acc(1:8)/acc(0)
+                              r%tau(20)=acc(9)/acc(0)
+                              r%tau(21)=acc(10)/acc(0)
+                           else
+                              r%tau(7:14)=0d0
+                              r%tau(20)=0d0
+                              r%tau(21)=0d0
+                           endif
+                           deallocate(subw)
+! slots 15-19: weighted r,th,\tau_FR,\tau_FC for LP
+! Slots 15-19 are weighted by the change in linear polarization, which is zero
+! (or has no elements) in total intensity: output zero instead of 0/0.
+                           if (sum(dlp) /= 0d0) then
+                              r%tau(15)=sum(dlp*g%x(1:r%npts-1)%data(2))/sum(dlp)
+                              r%tau(16)=sum(dlp*g%x(1:r%npts-1)%data(3))/sum(dlp)
+                              r%tau(17)=sum(dlp*tau_arr(1:r%npts-1,5))/sum(dlp)
+                              r%tau(18)=sum(dlp*tau_arr(1:r%npts-1,6))/sum(dlp)
+                              r%tau(19)=sum(dlp*sign(1d0,cos(g%x(1:r%npts-1)%data(3))))/sum(dlp)
+                           else
+                              r%tau(15:19)=0d0
+                           endif
+                           deallocate(tau_arr); deallocate(tau_temp); deallocate(dummy)
                            deallocate(inds); deallocate(dlp)
 !                           else
                         endif
@@ -313,7 +427,14 @@
                      endif
                   else
                      r%I(:,:)=0d0; r%npts=1
-                     if(EXTRA_QUANTS==1) r%tau(:)=0d0
+                     if(EXTRA_QUANTS==1) then
+                        r%tau(:)=0d0
+                        ! a ray skipped because of a NaN in j (fac is NaN) is
+                        ! flagged in slot 2 with its number of NaN samples, so it
+                        ! can be told from a ray without emission (slot 2 is
+                        ! otherwise 0 with one Stokes component; L8-G4)
+                        if(nnan > 0 .and. e%neq==1) r%tau(2)=dble(nnan)
+                     endif
 !                     write(6,*) 'zero: ',status, size(r%I,1), size(r%I,2), r%I(:,r%npts)
                   endif
 !           write(6,*) 'after intensity', i, r%npts, r%I(:,r%npts), sum(e%j(:,1))!, e%j(:,1), e%K(:,1)
@@ -439,6 +560,7 @@
             call del_rad_trans(r)
             call del_radtrans_integrate_data()
             call del_fluid_model(f)
+            if (multibin) call select_aperture_binary(1)
             
      !         write(6,*) 'after fluid'
             deallocate(nu); deallocate(s2xi); deallocate(c2xi)
@@ -464,6 +586,321 @@
          call del_geodesic(g)
   !        write(6,*) 'del geo: ',allocated(g%gk%muf)
          end subroutine grtrans_driver
+
+         subroutine refine_ray(iray,fr,spm,epar,fac,fname,ename,rshift)
+! Adaptive ray refinement (RT_background.tex, "How to resolve the rays").  The ray has
+! been integrated with explin on the nn(3) geokerr points; e%j, e%K hold the
+! invariant j/fac and K*LBH there (the optical depth is recomputed here,
+! running_tau).  Rays with fewer than four points are left alone.  Intervals are bisected where the sampling is too coarse:
+!   triggers (first pass, original intervals): Delta tau > 0.5; a cyclotron
+!     harmonic crossing, floor(nu/(g nu_c)) different at the two ends, counted
+!     only where harmonics are separate (n <= 2/(e^2 Theta_e), the cap of
+!     cyclotron_emis.f90); or j or alpha changing by more than 10x;
+!   only intervals with camera-side tau < refine_tau_cut, whose explin
+!     contribution is at least refine_atol_frac of the ray total;
+!   accuracy target: a bisected interval is accepted when its contribution
+!     changes by less than refine_rtol, otherwise both halves are bisected
+!     again, up to refine_max_depth levels and refine_max_points points.
+! New points take their position from a cubic in the affine parameter through
+! the neighboring geokerr points, their photon momentum from calc_nullp at
+! that position (with the radial and polar signs of the nearer end point, so
+! an interval containing a turning point is split at the right place), and
+! then pass through the same fluid, tetrad and emissivity chain as the ray.
+! The intensity is then the explin sum over the refined points; the extra
+! quantities (EXTRA_QUANTS) stay on the original points.
+         integer, intent(in) :: iray
+         real(kind=8), intent(in) :: fr, fac
+         type (source_params), intent(in) :: spm
+         type (emis_params), intent(in) :: epar
+         character(len=100), intent(in) :: fname, ename
+         real(kind=8), dimension(:), intent(in) :: rshift
+         real(kind=8), dimension(:), allocatable :: lam, jv, kv, tv, cold, &
+              lam2, jv2, kv2, lmid, jmid, kmid
+         real(kind=8), dimension(:), allocatable :: hv
+         integer, dimension(:), allocatable :: bix, bix2, imid
+         logical, dimension(:), allocatable :: act, act2
+         real(kind=8) :: total, cnew, dl
+         integer :: n0, n, cap, lev, ii, jj, nnew, nadd, flag
+         n0=g%npts
+         ! the cubic of refine_eval_points needs four points (i0 = n0-3 >= 1)
+         if (n0 < 4) return
+         cap=max(refine_max_points,n0)
+         allocate(lam(cap),jv(cap),kv(cap),tv(cap),cold(cap),bix(cap),act(cap))
+         allocate(hv(n0))
+         n=n0
+         lam(1:n)=g%lambda(1:n); jv(1:n)=e%j(:,1); kv(1:n)=abs(e%K(:,1))
+         do ii=1,n
+            bix(ii)=min(ii,n0-1)
+         enddo
+         hv=harmonic_index(fr/rshift(1:n0),e%bcgs,e%tcgs,f%model==APERTURE)
+         call running_tau()
+         act=.false.
+         do ii=1,n-1
+            act(ii)=(tv(ii+1)-tv(ii) > 0.5d0) .or. &
+                 (hv(ii) /= hv(ii+1) .and. max(hv(ii),hv(ii+1)) >= 0d0) .or. &
+                 jump(jv(ii),jv(ii+1)) .or. jump(kv(ii),kv(ii+1))
+         enddo
+         flag=0; nadd=0
+         do lev=1,refine_max_depth
+            if (lev > 1) call running_tau()
+            total=explin_sum()
+            do ii=1,n-1
+               if (act(ii)) then
+                  cold(ii)=term(ii)
+                  if (tv(ii) >= refine_tau_cut .or. &
+                       abs(cold(ii)) < refine_atol_frac*abs(total)) act(ii)=.false.
+               endif
+            enddo
+            nnew=count(act(1:n-1))
+            if (nnew == 0) exit
+            if (n+nnew > cap) then
+! Point budget: keep the intervals nearest the camera (least attenuated).
+               flag=ior(flag,2)
+               nnew=cap-n
+               jj=0
+               do ii=1,n-1
+                  if (act(ii)) then
+                     jj=jj+1
+                     if (jj > nnew) act(ii)=.false.
+                  endif
+               enddo
+               if (nnew == 0) exit
+            endif
+            allocate(lmid(nnew),imid(nnew),jmid(nnew),kmid(nnew))
+            jj=0
+            do ii=1,n-1
+               if (act(ii)) then
+                  jj=jj+1; imid(jj)=ii; lmid(jj)=0.5d0*(lam(ii)+lam(ii+1))
+               endif
+            enddo
+            call refine_eval_points(lmid,bix(imid),fr,spm,epar,fac,fname,ename,jmid,kmid)
+! Merge the new points and test each bisected interval against its old
+! contribution (same camera-side tau at its near end).
+            allocate(lam2(cap),jv2(cap),kv2(cap),bix2(cap),act2(cap))
+            act2=.false.
+            jj=0
+            do ii=1,n
+               lam2(ii+jj)=lam(ii); jv2(ii+jj)=jv(ii); kv2(ii+jj)=kv(ii); bix2(ii+jj)=bix(ii)
+               if (ii < n) then
+                  if (act(ii)) then
+                     jj=jj+1
+                     lam2(ii+jj)=lmid(jj); jv2(ii+jj)=jmid(jj); kv2(ii+jj)=kmid(jj)
+                     bix2(ii+jj)=bix(ii)
+                     dl=0.5d0*abs(lmid(jj)-lam(ii))*(kv(ii)+kmid(jj))
+                     cnew=exp(-tv(ii))*(local_term(lam(ii),lmid(jj),jv(ii),jmid(jj),kv(ii),kmid(jj)) &
+                          +exp(-dl)*local_term(lmid(jj),lam(ii+1),jmid(jj),jv(ii+1),kmid(jj),kv(ii+1)))
+                     if (abs(cnew-cold(ii)) > refine_rtol*abs(cnew) .and. &
+                          abs(cnew) >= refine_atol_frac*abs(total)) then
+                        if (lev < refine_max_depth) then
+                           act2(ii+jj-1)=.true.; act2(ii+jj)=.true.
+                        else
+                           flag=ior(flag,1)
+                        endif
+                     endif
+                  endif
+               endif
+            enddo
+            n=n+nnew; nadd=nadd+nnew
+            lam(1:n)=lam2(1:n); jv(1:n)=jv2(1:n); kv(1:n)=kv2(1:n); bix(1:n)=bix2(1:n)
+            act(1:n)=act2(1:n)
+            deallocate(lam2,jv2,kv2,bix2,act2,lmid,imid,jmid,kmid)
+         enddo
+         if (nadd > 0) then
+            call running_tau()
+            r%I(1,:)=explin_sum()*fac*LBH
+         endif
+         if (allocated(refine_added)) then
+            if (iray >= 1 .and. iray <= size(refine_added)) then
+               refine_added(iray)=refine_added(iray)+nadd
+               refine_flag(iray)=ior(refine_flag(iray),flag)
+            endif
+         endif
+         deallocate(lam,jv,kv,tv,cold,bix,act,hv)
+
+         contains
+
+           subroutine running_tau()
+! Same trapezoid as calc_opt_depth, from the camera (point 1).
+           integer :: q
+           tv(1)=0d0
+           do q=2,n
+              tv(q)=tv(q-1)+0.5d0*abs(lam(q)-lam(q-1))*(kv(q)+kv(q-1))
+           enddo
+           end subroutine running_tau
+
+           function local_term(la,lb,ja,jb,ka,kb) result(c)
+! explin contribution of one interval without the camera-side attenuation
+! (radtrans_integrate_explin).
+           real(kind=8), intent(in) :: la,lb,ja,jb,ka,kb
+           real(kind=8) :: c,d,ed,w0,w1,sa,sb
+           d=0.5d0*abs(lb-la)*(ka+kb)
+           if (d < 1d-4) then
+              c=0.5d0*abs(lb-la)*(ja+jb*exp(-d))
+           else
+              ed=exp(-d); w0=1d0-ed; w1=(1d0-ed-d*ed)/d
+              sa=0d0; sb=0d0
+              if (ka > 0d0) sa=ja/ka
+              if (kb > 0d0) sb=jb/kb
+              c=sa*(w0-w1)+sb*w1
+           endif
+           end function local_term
+
+           function term(q) result(c)
+           integer, intent(in) :: q
+           real(kind=8) :: c
+           c=exp(-tv(q))*local_term(lam(q),lam(q+1),jv(q),jv(q+1),kv(q),kv(q+1))
+           end function term
+
+           function explin_sum() result(tot)
+           real(kind=8) :: tot
+           integer :: q
+           tot=0d0
+           do q=1,n-1
+              if (tv(q) > 700d0) exit
+              tot=tot+term(q)
+           enddo
+           end function explin_sum
+
+           logical function jump(a,b)
+           real(kind=8), intent(in) :: a,b
+           jump=max(abs(a),abs(b)) > 10d0*min(abs(a),abs(b))
+           end function jump
+
+         end subroutine refine_ray
+
+         function harmonic_index(nu,bcgs,tcgs,tdimless) result(h)
+! floor(nu/nu_c) with nu_c = eB/(2 pi m c), or -1 where the harmonics overlap
+! (n > 2/(e^2 Theta_e), the cap of cyclotron_emis.f90) or B = 0.
+! tcgs is the temperature in kelvin, or already Theta_e when tdimless (the
+! APERTURE model, convert_fluidvars_aperture).  Before 2026-10-15 it was
+! always read as kelvin, so for APERTURE n* ~ 1.6e9/Theta_e and every change
+! of floor(nu/nu_c) triggered a split (docs/muchado.md, M4-F1).
+         real(kind=8), dimension(:), intent(in) :: nu,bcgs,tcgs
+         logical, intent(in) :: tdimless
+         real(kind=8), dimension(size(nu)) :: h
+         real(kind=8) :: nh, nstar, th
+         integer :: q
+         do q=1,size(nu)
+            h(q)=-1d0
+            if (bcgs(q) > 0d0 .and. tcgs(q) > 0d0) then
+               nh=nu(q)/(EC*bcgs(q)/(2d0*PI*ME*CC))
+               if (tdimless) then
+                  th=tcgs(q)
+               else
+                  th=KB*tcgs(q)/(ME*CC*CC)
+               endif
+               nstar=max(1d0,2d0/(exp(2d0)*th))
+               if (nh <= nstar) h(q)=aint(nh)
+            endif
+         enddo
+         end function harmonic_index
+
+         subroutine refine_eval_points(lm,ib,fr,spm,epar,fac,fname,ename,jout,kout)
+! Invariant j/fac and |K|*LBH at new points with affine parameters lm inside
+! original intervals ib, through the ray's fluid, tetrad and emissivity chain
+! on private fluid and emissivity objects (the ray's own f and e are kept).
+         real(kind=8), dimension(:), intent(in) :: lm
+         integer, dimension(:), intent(in) :: ib
+         real(kind=8), intent(in) :: fr, fac
+         type (source_params), intent(in) :: spm
+         type (emis_params), intent(in) :: epar
+         character(len=100), intent(in) :: fname, ename
+         real(kind=8), dimension(:), intent(out) :: jout, kout
+         type (fluid) :: fl
+         type (emis) :: el
+         type (source_params) :: sps
+         type (emis_params) :: eps
+         type (four_vector), dimension(size(lm)) :: xs, ks
+         real(kind=8), dimension(size(lm)) :: s2x, c2x, angs, rsh, cosn, nus, sr, sm
+         real(kind=8), dimension(size(lm),10) :: met
+         real(kind=8), dimension(size(lm)) :: ncgs, bcgs, tcgs, ncgsnth
+         real(kind=8), dimension(:,:), allocatable :: nnthcgs, fnu
+         real(kind=8), dimension(:), allocatable :: freqarr
+         real(kind=8) :: w(4)
+         integer :: ns, q, i0, a, b, n0, it
+         ns=size(lm); n0=g%npts
+         do q=1,ns
+! cubic (Lagrange) in lambda through four geokerr points around the interval
+            i0=min(max(ib(q)-1,1),n0-3)
+            do a=1,4
+               w(a)=1d0
+               do b=1,4
+                  if (b /= a) w(a)=w(a)*(lm(q)-g%lambda(i0+b-1))/(g%lambda(i0+a-1)-g%lambda(i0+b-1))
+               enddo
+            enddo
+            xs(q)%data=0d0
+            do a=1,4
+               xs(q)%data=xs(q)%data+w(a)*g%x(i0+a-1)%data
+            enddo
+            it=ib(q)
+            if (abs(lm(q)-g%lambda(ib(q)+1)) < abs(lm(q)-g%lambda(ib(q)))) it=ib(q)+1
+            sr(q)=g%gk%su(1)*merge(-1d0,1d0,mod(nint(g%tprarr(it)),2)==1)
+            sm(q)=g%gk%sm(1)*merge(-1d0,1d0,mod(nint(g%tpmarr(it)),2)==1)
+         enddo
+         ks=calc_nullp(g%gk%q2(1),g%gk%l(1),g%gk%a,xs%data(2),cos(xs%data(3)),sr,sm,1,1)
+         met=kerr_metric(xs%data(2),xs%data(3),g%gk%a)
+         call assign_metric(xs,transpose(met))
+         call assign_metric(ks,transpose(met))
+! Start from copies of the ray's own objects so every scalar setting (nfreq,
+! nrelbin, ...) matches, then reallocate them for the ns new points.
+         fl=f
+         call del_fluid_model(fl)
+         call initialize_fluid_model(fl,fname,g%gk%a,ns)
+         el=e
+         call del_emissivity(el)
+         call select_emissivity_values(el,ename)
+         call get_fluid_vars(xs,ks,g%gk%a,fl)
+         s2x=0d0; c2x=0d0
+         call comoving_ortho(xs%data(2),xs%data(3),g%gk%a, &
+              g%gk%alpha(1),g%gk%beta(1),g%gk%mu0,fl%u,fl%b,ks,s2x,c2x, &
+              angs,rsh,cosn)
+         sps=spm
+         call initialize_source_params(sps,ns)
+         eps=epar
+         call initialize_emis_params(eps,ns)
+         call initialize_emissivity(el,ns,fl%nfreq,rsh,angs,cosn,fl%nrelbin,fl%bingammamin,fl%bingammamax)
+         allocate(nnthcgs(ns,fl%nrelbin))
+         call convert_fluid_vars(fl,ncgs,ncgsnth,nnthcgs,bcgs,tcgs,fnu,freqarr,sps)
+         call assign_emis_params(el,ncgs,ncgsnth,nnthcgs,bcgs,tcgs,fnu,freqarr,fl%nfreq)
+         eps%gmin=sps%gmin
+         eps%mu=sps%mu
+         call emis_model(el,eps)
+         nus=fr/rsh
+         call calc_emissivity(nus,el,eps)
+         call invariant_emis(el,rsh)
+         jout=el%j(:,1)/fac
+         kout=abs(el%K(:,1))*LBH
+         call del_source_params(sps)
+         call del_emis_params(eps)
+         call del_emissivity(el)
+         call del_fluid_model(fl)
+         end subroutine refine_eval_points
+
+         subroutine init_refine_stats(nrays)
+         integer, intent(in) :: nrays
+         if (allocated(refine_added)) deallocate(refine_added,refine_flag)
+         allocate(refine_added(nrays),refine_flag(nrays))
+         refine_added=0; refine_flag=0
+         end subroutine init_refine_stats
+
+         subroutine write_refine_stats(outname)
+! Summary to stdout and per-ray counts to outname: ray index, points added,
+! cap flag (1 = refine_max_depth reached unconverged, 2 = refine_max_points
+! ran out, 3 = both), for every ray that was refined or capped.
+         character(len=*), intent(in) :: outname
+         integer :: q, u
+         if (.not. allocated(refine_added)) return
+         write(6,'(a,i8,a,i10,a,i8,a,i8,a,i8)') 'refine: rays refined ', count(refine_added > 0), &
+              '  points added ', sum(int(refine_added,8)), '  max per ray ', maxval(refine_added), &
+              '  depth cap ', count(iand(refine_flag,1) /= 0), '  point cap ', count(iand(refine_flag,2) /= 0)
+         open(newunit=u,file=outname,form='formatted',status='replace')
+         write(u,'(a)') '# ray  points_added  flag(1=max_depth,2=max_points)'
+         do q=1,size(refine_added)
+            if (refine_added(q) > 0 .or. refine_flag(q) /= 0) &
+                 write(u,'(i8,1x,i8,1x,i2)') q, refine_added(q), refine_flag(q)
+         enddo
+         close(u)
+         end subroutine write_refine_stats
 
          subroutine convert_model(sp)
 !         type (fluid), intent(in) :: f

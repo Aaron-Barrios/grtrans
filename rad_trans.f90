@@ -34,6 +34,10 @@
             r%iflag=2
          else if (iname=='lsodasph') then
             r%iflag=3
+         else if (iname=='explin') then
+            ! exponential transfer step, source function linear in tau
+            ! (radtrans_integrate_explin; total intensity only)
+            r%iflag=4
          endif
 !         write(6,*) 'rneq: ',neq
          r%neq=neq
@@ -43,11 +47,13 @@
          allocate(r%I(r%neq,r%onpts))
          r%I(:,:)=0d0; r%npts=r%onpts
          if(extra.eq.1) then
-            if(npts.ne.1) then
-               nextra=19
-            else
-               nextra=7
-            endif
+! 21 = 19 stock slots + (20) emission-weighted plasma beta + (21) sigma.
+! MUST match nextra in pgrtrans.f90 (which sizes the camera's pixvals), or the
+! (/real(r%I), real(r%tau)/) constructor passed to save_raytrace_camera_pixel
+! has the wrong length.  Always 21, including the npts==1 branch: that branch
+! only fills slots 1-7 and the rest stay zeroed, which is self-consistent and
+! avoids the pre-existing size mismatch when a ray has a single point.
+            nextra=21
             allocate(r%tau(nextra)); r%tau(:)=0d0
          endif
 !         write(6,*) 'r%tau, r%I init: ',minval(r%tau),maxval(r%tau),minval(r%I),maxval(r%I)

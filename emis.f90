@@ -6,7 +6,8 @@
        use chandra_tab24, only: interp_chandra_tab24
        use calc_maxjutt, only: calc_maxjutt_subroutine
        use calc_maxcomp, only: calc_maxcomp_subroutine
-       implicit none
+      use jnu_table, only: init_jnu_table, del_jnu_table, hybrid_emissivity
+      implicit none
 
 ! Global constants for selecting emissivity
        integer,parameter :: ELAMBDA=0,ESYNCHTH=1,EPOLSYNCHTH=2, &
@@ -15,7 +16,7 @@
                   ESYNCHTHAV=13, ESYNCHTHAVNOABS=14, EPOLSYNCHSYMTH=15, &
                   EHYBRIDTHPL = 20, &
                   EHYBRIDTH=21, EHYBRIDPL=22, EMAXJUTT=23, EMAXCOMP=24, &
-                  EBINS=25, EHYBRIDTHBINS=26, ESYNCHTHBREMS=27
+                  EBINS=25, EHYBRIDTHBINS=26, ESYNCHTHBREMS=27, EJNUTABLE=28
 
        type emis
          real(kind=8), dimension(:,:), allocatable :: j,K,nnthcgs
@@ -360,6 +361,9 @@
          elseif(ename=='POLSYNCHSYMTH') then
             e%type=EPOLSYNCHSYMTH
             e%neq=4
+         elseif(ename=='JNUTABLE') then
+            e%type=EJNUTABLE
+            e%neq=1
          else
            write(6,*) 'WARNING -- Emissivity not recognized!'
          endif
@@ -442,6 +446,10 @@
           CASE (ESYNCHTHAVNOABS)
              allocate(e%tcgs(npts)); allocate(e%ncgs(npts))
              allocate(e%bcgs(npts))
+           CASE (EJNUTABLE)
+             allocate(e%tcgs(npts)); allocate(e%ncgs(npts))
+             allocate(e%bcgs(npts))
+             call init_jnu_table('jnu_table.bin')
            CASE (EBB)
              allocate(e%tcgs(npts))
            CASE (EFBB)
@@ -539,6 +547,8 @@
               call brememisHEROIC(nu,e%ncgs,e%tcgs,K)
            case(esynchthavnoabs)
               call synchemisnoabs(nu,e%ncgs,e%bcgs,e%tcgs,K)
+           case(ejnutable)
+              call hybrid_emissivity(nu,e%ncgs,e%bcgs,e%incang,e%tcgs,K(:,1),K(:,5))
            case(ebb)
              call bbemis(nu,e%tcgs,K)
            case(ebbpol)
@@ -600,6 +610,8 @@
            CASE (ESYNCHPL)
              e%ncgs=ncgs; e%bcgs=bcgs; e%tcgs=tcgs; e%ncgsnth=ncgsnth
            CASE (ESYNCHTHAV)
+              e%ncgs=ncgs; e%bcgs=bcgs; e%tcgs=tcgs
+           CASE (EJNUTABLE)
               e%ncgs=ncgs; e%bcgs=bcgs; e%tcgs=tcgs
            CASE (ESYNCHTHBREMS)
               e%ncgs=ncgs; e%bcgs=bcgs; e%tcgs=tcgs
@@ -762,6 +774,10 @@
            CASE (ESYNCHTHAVNOABS)
              deallocate(e%tcgs); deallocate(e%ncgs)
              deallocate(e%bcgs); deallocate(e%incang)
+           CASE (EJNUTABLE)
+             deallocate(e%tcgs); deallocate(e%ncgs)
+             deallocate(e%bcgs); deallocate(e%incang)
+             call del_jnu_table()
            CASE (EBINS) !AC
              deallocate(e%bcgs); deallocate(e%incang)
              deallocate(e%nnthcgs)
@@ -791,7 +807,19 @@
 !         write(6,*) 'opt depth: ',size(s),size(e%K(:,1))
 !         write(6,*) 's: ', s
 !         write(6,*) 'K: ',e%K(:,1)
-         tau=tsum(s,abs(e%K(:,indx)))
+! Running (cumulative) trapezoid optical depth from point 1, the camera end of
+! the ray, to every point: tau(k) = int_{s(1)}^{s(k)} |K| ds.  math.f90's tsum
+! returns only the TOTAL integral broadcast to every element, which made tau
+! constant along the ray: the MAX_TAU cut in radtrans_integrate then never
+! applied, the e^{-tau} weights of the EXTRA_QUANTS cancelled, and taudex was
+! never a photosphere index (history.tex, "The optical depth was not a running
+! integral").
+         integer :: k
+         tau(1)=0d0
+         do k=2,size(s)
+            tau(k)=tau(k-1)+(s(k)-s(k-1))* &
+                 (abs(e%K(k,indx))+abs(e%K(k-1,indx)))/2d0
+         enddo
          end subroutine calc_opt_depth
 
          subroutine rotate_emis(e,s2xi,c2xi)

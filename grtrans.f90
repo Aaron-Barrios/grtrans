@@ -45,6 +45,7 @@
             fbl06,fnp,ftp,frin,frout,fthin,fthout,fphiin,fphiout,fscalefac,sigcut,coefindx, &
             epotherargs,nepotherargs)
 ! if you want to use pgrtrans ivals, ab, freqs then do so before here
+! (refinement statistics are now initialized and written by grtrans_main)
        call del_pgrtrans_data()
 ! this is now done directly in pgrtrans
 !       call delete_inputs()

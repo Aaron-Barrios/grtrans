@@ -17,7 +17,11 @@
     integer :: IS_LINEAR_STOKES = 1
     integer(kind=4) :: maxsteps = 100000
     integer, dimension(4) :: stats
-    real(kind=8) :: ortol = 1d-6, oatol = 1d-8, hmax = 10, MAX_TAU, MAX_TAU_DEFAULT = 10d0, thin = 1d-2, sphtolfac=1d0
+    ! oatol: LSODA absolute tolerance on the fac-normalized intensity.  1d-8
+    ! was far above the true normalized intensity in optically thick gas, so
+    ! LSODA accepted steps whose error exceeded the answer (negative and huge
+    ! pixels; history.tex, "The lsoda integrator fails in optically thick gas").
+    real(kind=8) :: ortol = 1d-6, oatol = 1d-30, hmax = 10, MAX_TAU, MAX_TAU_DEFAULT = 10d0, thin = 1d-2, sphtolfac=1d0
 
 !$omp threadprivate(ss,tau,s0,jj,KK,intensity,lindx,nptstot,npts,nptsout,s,stats,stokesq,stokesu,stokesv)
 !$omp threadprivate(ortol,oatol,hmax,thin,MAX_TAU,QQ,PP,imm,OO,IS_LINEAR_STOKES,sphtolfac)
@@ -90,7 +94,7 @@
         if(present(oa)) then
            oatol = oa
         else
-           oatol = 1d-8
+           oatol = 1d-30   ! was 1d-8, see the declaration above
         endif
         if(present(th)) then
            thin = th
@@ -122,7 +126,7 @@
         tau(:) = 0d0
         KK(:,:) = 0d0
         s0(:) = 0d0
-        if(iflag==1) then
+        if(iflag==1 .or. (iflag==4 .and. nequations==4)) then
            allocate(QQ(npts,nequations,nequations)); allocate(PP(npts,nequations))
            allocate(imm(npts,nequations,nequations))
            QQ = 0d0; PP = 0d0; imm = 0d0
@@ -183,6 +187,14 @@
               call radtrans_integrate_formal(s,jj,KK(:,1:4),KK(:,5:7))
            else
               call radtrans_integrate_quadrature(s,jj(:,1),KK(:,1))
+           endif
+        elseif (iflag==4) then
+           if(nequations==1) then
+              call radtrans_integrate_explin(s,jj(:,1),KK(:,1))
+           else
+              ! polarized transfer is not implemented for explin; use DELO,
+              ! which is the polarized member of the same family
+              call radtrans_integrate_delo(s,tau,jj,KK(:,1:4),KK(:,5:7),PP,QQ,imm)
            endif
         endif
 !        write(6,*) 'assign intensity', size(rI,1), size(rI,2), size(intensity,1), size(intensity,2), nptsout
@@ -875,6 +887,43 @@
         return
       end subroutine radtrans_integrate_formal
 
+      subroutine radtrans_integrate_explin(s,j,K)
+        ! Exponential ("short-characteristics") transfer step with the source
+        ! function S = j/K linear in optical depth across each interval between
+        ! ray points (second order).  With tau the running optical depth from
+        ! the camera (point 1) and D = tau(i+1) - tau(i),
+        !   I = sum_i exp(-tau(i)) * [ S(i)*(w0 - w1) + S(i+1)*w1 ],
+        !   w0 = 1 - exp(-D),   w1 = (1 - exp(-D) - D*exp(-D)) / D .
+        ! Both weights are non-negative, so I is never negative and never
+        ! exceeds the largest source function.  A thin interval reduces to the
+        ! trapezoid rule on j*exp(-tau) (used directly for D < 1e-4, which also
+        ! avoids 0/0 where K -> 0); a thick interval contributes the source
+        ! function at its camera-side point, attenuated to the camera.
+        ! Total intensity only (RT_background.tex, "How to resolve the rays").
+        real(kind=8), dimension(:), intent(in) :: s,j,K
+        real(kind=8) :: d, ed, w0, w1, si, sj, total
+        integer :: i, n
+        n = size(s)
+        total = 0d0
+        do i = 1, n-1
+           if (tau(i) > 700d0) exit                 ! exp(-tau) underflows
+           d = tau(i+1) - tau(i)
+           if (d < 1d-4) then
+              total = total + 0.5d0*abs(s(i+1)-s(i)) &
+                   *(j(i)*exp(-tau(i)) + j(i+1)*exp(-tau(i+1)))
+           else
+              ed = exp(-d)
+              w0 = 1d0 - ed
+              w1 = (1d0 - ed - d*ed)/d
+              si = 0d0; sj = 0d0
+              if (abs(K(i)) > 0d0) si = j(i)/abs(K(i))
+              if (abs(K(i+1)) > 0d0) sj = j(i+1)/abs(K(i+1))
+              total = total + exp(-tau(i))*(si*(w0 - w1) + sj*w1)
+           endif
+        enddo
+        intensity(1,:) = total
+      end subroutine radtrans_integrate_explin
+
       subroutine radtrans_integrate_quadrature(s,j,K)
         real(kind=8), dimension(:), intent(in) :: s,j,K
 ! quadrature solution assuming I0=0, - sign from s,j,tau being tabulated backwards:
@@ -885,7 +934,7 @@
         deallocate(jj); deallocate(KK)
         deallocate(s); deallocate(ss); deallocate(s0); deallocate(tau)
         deallocate(intensity)
-        if(iflag==1) then
+        if(iflag==1 .or. (iflag==4 .and. nequations==4)) then
            deallocate(PP); deallocate(QQ); deallocate(imm)
         elseif(iflag==2) then
 !           deallocate(OO)
