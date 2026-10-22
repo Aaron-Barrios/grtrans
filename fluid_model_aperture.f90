@@ -339,7 +339,7 @@
         integer :: npts, i, lr, ur, lth, uth, k00, k01, k10, k11
         real(kind=8) :: rq, thq, rd, td, w00, w01, w10, w11
         real(kind=8) :: ne_i, pe_i, sw, ss, bs
-        real(kind=8) :: rmin, rmax, thmin, thmax
+        real(kind=8) :: rmin, rmax, thmin, thmax, rlo, rhi, thlo, thhi
         type (four_Vector), dimension(size(x0)) :: u_ks, b_ks
         real(kind=8), dimension(size(x0)) :: rr, tth
         logical, dimension(size(x0)) :: filled
@@ -355,6 +355,11 @@
         npts = size(x0)
         rmin = r_arr(1); rmax = r_arr(nr)
         thmin = th_arr(1); thmax = th_arr(nth)
+        ! the grid's own extent: half a cell beyond the outermost cell centers
+        ! (half a step in ln r and in theta; at the axis this is theta = 0 and pi)
+        rlo = rmin * sqrt(r_arr(1) / r_arr(2)); rhi = rmax * sqrt(r_arr(nr) / r_arr(nr-1))
+        thlo = thmin - 0.5d0 * (th_arr(2) - th_arr(1))
+        thhi = thmax + 0.5d0 * (th_arr(nth) - th_arr(nth-1))
         rr = x0%data(2)    ! BL r == KS r
         tth = x0%data(3)   ! BL theta == KS theta
 
@@ -370,9 +375,17 @@
 
         do i = 1, npts
            rq = rr(i); thq = tth(i)
-           if (rq < rmin .or. rq > rmax .or. thq < thmin .or. thq > thmax) then
+           ! beyond the grid there is no fluid; between the outermost cell
+           ! centers and the grid's edge (the half cell at the axis and at the
+           ! inner and outer radii) the edge cell's values hold, as inside a
+           ! cell (muchado.md L8-F9; until 2026-10-22 those points got nothing).
+           ! Only the interpolation uses the clamped position; the metric
+           ! below uses the true one.
+           if (rq < rlo .or. rq > rhi .or. thq < thlo .or. thq > thhi) then
               cycle
            endif
+           rq = min(max(rq, rmin), rmax)
+           thq = min(max(thq, thmin), thmax)
            call bracket(r_arr, nr, rq, lr);  ur = lr + 1
            call bracket(th_arr, nth, thq, lth); uth = lth + 1
            ! linear in x1 = ln r and x2 = theta (Aperture's cell coordinates)

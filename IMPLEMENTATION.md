@@ -270,12 +270,12 @@ the ray:
 
 1. **Defaults:** every sample starts empty ($n_e=\Theta_e=|b|=0$, $u=(1,0,0,0)$,
    $b=0$, $\beta_p=\sigma=0$; `:361-368`).
-2. **No-emission region:** samples outside the box of cell centers,
-   $[r_1,r_{n_r}]\times[\theta_1,\theta_{n_\theta}]$, stay empty (`:372-374`):
-   nothing within half a cell of the axis or of the inner and outer radial
-   edges (muchado L8-F9). The box shrinks with $d$: at $d=1$
-   $r\in[1.0011,85.53]$, $\theta\in[7.7\times10^{-4},\pi-7.7\times10^{-4}]$; at
-   $d=4$ $r\ge1.0044$ and $\theta\ge3.1\times10^{-3}$.
+2. **The grid's edge:** samples beyond the grid, half a cell (half a step in
+   $\ln r$ and $\theta$) past the outermost cell centers, stay empty; between
+   the outermost centers and that edge (at the axis and at the inner and outer
+   radii) the position is clamped to the box of centers for the
+   interpolation, so the edge cell's values hold, while the metric uses the
+   true position (`aperture_vals`; history.tex, Stage 93).
 3. **Cell and weights:** bisection on each axis (`:294-309`), weights linear in
    $\ln r$ and $\theta$ (`:378-388`): bilinear interpolation between the four
    surrounding cell centers.
@@ -717,9 +717,9 @@ upstream files and the added ones below).
 
 ## 16. Known problems
 
-In `docs/muchado.md` (ids as of 2026-10-15): interpolation toward the table's floor (L8-F7); the no-emission box
-(L8-F9); the pipeline does not read the NaN flag of extra slot 2 (L8-G4,
-pipeline side); the cyclotron line width near
-$90^\circ$ (L1-R4). (L1-R18, the extra slots averaging empty corners as zero, was fixed on 2026-10-19; L8-G7, stack use, was closed the same day: the arrays are on the heap.)
+In `docs/muchado.md` (ids as of 2026-10-15): the cyclotron line width near
+$90^\circ$ (L1-R4); the table's floor (L8-F7, no effect: history.tex,
+Stage 88), the no-emission box (L8-F9, Stage 93) and the NaN flag of extra
+slot 2 (L8-G4, Stage 92) are closed. (L1-R18, the extra slots averaging empty corners as zero, was fixed on 2026-10-19; L8-G7, stack use, was closed the same day: the arrays are on the heap.)
 Fixed on 2026-10-15 (`history.tex`): M4-F1, L8-F2, F4 (documented), F5, F10,
 F11, F12, G4 (Fortran side), G6, G8, C8, L1-R7, L1-R17.
