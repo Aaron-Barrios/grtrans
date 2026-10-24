@@ -46,21 +46,21 @@ and in the project (`README.md`, "How grtrans is used").
 | Start | read `files.in`, then the `inputs.in` namelists | `grtrans_program.f90:7-13`, `read_inputs.f90:59-87` |
 | Cameras | frequencies, inclination, one camera per (frequency, mass-rate, inclination, time) | `pgrtrans.f90:87-119`, `:144-146` |
 | Fluid | read the APERTURE binary once | `pgrtrans.f90:174` → `fluid.f90:203-204` → `fluid_model_aperture.f90:138-232` |
-| Pixels | per-pixel constants of motion, all rays at once | `pgrtrans.f90:187-190` → `geodesics.f90:64-111` → `geokerr_wrapper.f:1` |
-| Ray loop | OpenMP over rays | `pgrtrans.f90:215-228` → `grtrans_driver` |
-| Geodesic | sample points of this ray | `grtrans_driver.f90:106` → `geodesics.f90` → `GEOKERR` (`geokerr_wrapper.f:357-604`) |
-| Fluid at samples | interpolate the binary at every sample | `grtrans_driver.f90:149` → `fluid_model_aperture.f90:331-474` |
-| Comoving frame | redshift $g$ and field angle $\theta_B$ per sample | `grtrans_driver.f90:151-153` → `kerr.f90:586-730` |
-| To cgs | $n_e$, $B$, $\Theta_e$ | `grtrans_driver.f90:188` → `fluid.f90:999-1036` |
-| Per frequency | comoving $\nu$, emissivity and absorption | `grtrans_driver.f90:200-201` → `emis.f90:550-551` → `jnu_table.f90:370-427` |
-| Invariants | $j\,g^2$, $\alpha/g$, normalization | `grtrans_driver.f90:259-262`, `emis.f90:859-866` |
-| Transfer | `explin` along the ray | `grtrans_driver.f90:268` → `radtrans_integrate.f90:890-925` |
-| Refinement | optional, off by default | `grtrans_driver.f90:276-278`, `:590-903` |
-| Extras | emission-weighted averages | `grtrans_driver.f90:280-405` |
-| Store | pixel column of the camera | `grtrans_driver.f90:443-459`; written by `camera.f90:322-341` |
+| Pixels | per-pixel constants of motion, all rays at once | `pgrtrans.f90:194-197` → `geodesics.f90:64-111` → `geokerr_wrapper.f:1` |
+| Ray loop | OpenMP over rays | `pgrtrans.f90:224-235` → `grtrans_driver` |
+| Geodesic | sample points of this ray | `grtrans_driver.f90:107` → `geodesics.f90` → `GEOKERR` (`geokerr_wrapper.f:357-604`) |
+| Fluid at samples | interpolate the binary at every sample | `grtrans_driver.f90:150` → `fluid_model_aperture.f90:331-474` |
+| Comoving frame | redshift $g$ and field angle $\theta_B$ per sample | `grtrans_driver.f90:152-154` → `kerr.f90:586-730` |
+| To cgs | $n_e$, $B$, $\Theta_e$ | `grtrans_driver.f90:189` → `fluid.f90:999-1036` |
+| Per frequency | comoving $\nu$, emissivity and absorption | `grtrans_driver.f90:201-202` → `emis.f90:550-551` → `jnu_table.f90:370-427` |
+| Invariants | $j\,g^2$, $\alpha/g$, normalization | `grtrans_driver.f90:260-263`, `emis.f90:859-866` |
+| Transfer | `explin` along the ray | `grtrans_driver.f90:269` → `radtrans_integrate.f90:910-992` |
+| Refinement | optional, off by default | `grtrans_driver.f90:277-279`, `:591-883` |
+| Extras | emission-weighted averages | `grtrans_driver.f90:281-407` |
+| Store | pixel column of the camera | `grtrans_driver.f90:444-460`; written by `camera.f90:322-341` |
 
 One geodesic and one fluid lookup serve every frequency of a camera
-(`grtrans_driver.f90:132-201`), so several frequencies in one run cost little
+(`grtrans_driver.f90:133-202`), so several frequencies in one run cost little
 more than one (muchado §15 item 3). One geodesic also serves several fluid
 binaries traced in one run, one camera each (§5, "Several binaries in one
 run").
@@ -143,10 +143,20 @@ lies exactly at `uout`, at a turning point or at the horizon.
   3632 at 3200 (`:571,593`).
 - **Rays that never get inside `uout`** carry no samples (`:493,597`;
   `geodesics.f90:294`): the pixel is 0.
-- **Per sample** grtrans keeps $r$, $\theta$, $\phi$, $t$ (`t0=0` with
-  `nload=1`), the affine parameter $\lambda$ (decreasing along the array: index
-  1 is at `uout`, the last sample has $\lambda=0$) and the photon momentum
-  $k^\mu$ (`geodesics.f90:333-364`).
+- **Per sample** grtrans keeps $r$, $\theta$, the affine parameter $\lambda$
+  (decreasing along the array: index 1 is at `uout`, the last sample has
+  $\lambda=0$) and the photon momentum $k^\mu$ (`geodesics.f90:333-364`).
+  $\phi$ and $t$ are 0: GEOKERR runs in a λ-only mode
+  (`geokerr_wrapper.f:3776-3803`, set by `pgrtrans.f90:193` before the
+  $\mu$ loop and so before any geodesic), in which `GEOPHITIME` skips the elliptic integrals of the third kind
+  (Carlson $R_J$, $R_C$) that only $\phi$ and $t$ need and computes $\lambda$
+  from the first- and second-kind ones exactly as before. The APERTURE fluid
+  is axisymmetric and the traces use fast light, so nothing reads $\phi$ or
+  $t$ but extra slot 9 (emission-weighted $\phi$), which the pipeline does not
+  store. Images and stored extras are bit-identical to the full geodesic; a
+  frame costs 7–21% less (most at one frequency). The environment variable
+  `GRT_GEODESIC_FULL` (any value) restores $\phi$ and $t$, e.g. for slow light
+  (muchado L16).
 
 Because the samples are fixed in $u$, a ray at $d=1$ crosses 1350–4200 grid
 cells inside the field of view, and 3200 samples miss 9–36% of them
@@ -234,7 +244,7 @@ parameter per `mdot`, which APERTURE does not use):
   (`:275-282`) sets it.
 - **Driver.** For model parameter $m$, `grtrans_driver` selects binary $m$
   and redoes the fluid at the samples and `comoving_ortho` along the same
-  geodesic (`grtrans_driver.f90:146-147, 164-176`); the rest of the loop
+  geodesic (`grtrans_driver.f90:147-148, 165-177`); the rest of the loop
   body (conversion, emissivity, transfer, refinement, extras) is unchanged,
   so it is exactly a single-binary trace of binary $m$. With one binary
   nothing changes (`multibin` is false).
@@ -346,12 +356,12 @@ sits at the mask edge, by factors (§14).
 
 ## 7. The comoving frame
 
-`comoving_ortho` (`grtrans_driver.f90:151-153` → `kerr.f90:550-562, 586-730`)
+`comoving_ortho` (`grtrans_driver.f90:152-154` → `kerr.f90:550-562, 586-730`)
 builds the fluid tetrad ($e_{(t)}=u$, after Kulkarni et al. 2011; `:645-658`)
 and projects the photon momentum on it:
 
 - **Redshift** $g=\nu_{\rm obs}/\nu_{\rm emit}=1/k_{(t)}$ (`:722`); the
-  comoving frequency is $\nu'=\nu/g$ (`grtrans_driver.f90:200`).
+  comoving frequency is $\nu'=\nu/g$ (`grtrans_driver.f90:201`).
 - **Field angle:** $\cos\theta_B=\hat b\cdot\hat k$ in the fluid frame (`kerr.f90:694,
   713`), set to 0.5 where $b\cdot b\le0$ (`kerr.f90:714-718`).
 - **Clamp:** $\cos\theta_B$ is limited to $[-0.9999,0.9999]$ (`kerr.f90:618,
@@ -408,56 +418,69 @@ dump 500, $d=4$, are bit-identical either way). A NaN $n_e$ or $\Theta_e$
 still reaches the table, so the NaN stays visible (§12).
 
 Only Stokes $I$ is carried (`nvals=1`, `e%neq=1`; `emis.f90:366-370`); with
-`nvals=4` grtrans stops with a message (`grtrans_driver.f90:155-160`).
+`nvals=4` grtrans stops with a message (`grtrans_driver.f90:156-161`).
 
 ## 9. Radiative transfer
 
 - **Invariants.** `invariant_emis` multiplies $j$ by $g^2$ and divides
-  $\alpha$ by $g$ (`emis.f90:859-866`; `grtrans_driver.f90:259`), so the
+  $\alpha$ by $g$ (`emis.f90:859-866`; `grtrans_driver.f90:260`), so the
   integrator works with the observed-frame $I_\nu$ directly. The driver then
   divides $j$ by ${\tt fac}=\sum j\,(\lambda_1-\lambda)$ and multiplies
   $\alpha$ by `LBH` (lengths in cm, $GM/c^2$), and multiplies the result back
-  (`:227, 260, 271`). A ray with ${\tt fac}\le0$ (no emission) is skipped
-  and stored as 0 (`:235-238, 448-450`).
+  (`:230, 263, 274`). A ray with ${\tt fac}\le0$ (no emission) is skipped
+  and stored as 0 (`:241, 430-431`).
 - **Optical depth** runs from the camera end, a trapezoid sum of
-  $\alpha\,d\lambda$ (`emis.f90:810-823`; `grtrans_driver.f90:264-265`).
-- **`explin`** (`iname='explin'`, our addition; `radtrans_integrate.f90:890-925`):
+  $\alpha\,d\lambda$ (`emis.f90:810-823`; `grtrans_driver.f90:265-266`).
+- **`explin`** (`iname='explin'`, our addition; `radtrans_integrate.f90:910-992`):
   $I=\sum_ie^{-\tau_i}[S_i(w_0-w_1)+S_{i+1}w_1]$ with $S=j/|\alpha|$,
   $D=\tau_{i+1}-\tau_i$, $w_0=1-e^{-D}$, $w_1=(1-e^{-D}-De^{-D})/D$: exact
   for a source function linear in $\tau$ across each interval; the trapezoid
-  rule on $j\,e^{-\tau}$ where $D<10^{-4}$; it stops where $\tau>700$. It has
-  no tolerance, so its error is the sampling error of §4.
+  rule on $j\,e^{-\tau}$ where $D<10^{-4}$; it stops where $\tau>700$.
+  **Thick intervals are sub-stepped:** an interval with
+  $D>$ `EXPLIN_DTAU_SUB` $=0.02$ (`:30`) is split into $\lceil D/0.02\rceil$
+  sub-steps with $j$ and $\alpha$ linear in $\lambda$ inside it ($\tau$ then
+  quadratic, ending at $\tau_{i+1}$), each summed with the same weights.
+  Without it, a single interval that is optically thick and across which
+  $\alpha$ changes by orders of magnitude takes the source function of its
+  end point, not of its photosphere: the 16 and 160 MHz pair-plasma images
+  came out 3–12% too dim at 25600 samples (one ray 7.7× too dim). With it,
+  every frame tested (1.6, 16, 160 MHz and 230 GHz; 64² and 128²) is within
+  0.65% of the 4×-sample reference, the remaining error being the
+  sampling error of §4; it costs nothing measurable (the integration is
+  <1% of a trace). (`docs/muchado.md` L14; `history.tex`, Stage 99.)
 - **The others:** `lsoda` (ODE solver with `MAX_TAU = 10`, tolerances 1e-6 /
-  1e-30; a failed ray is zeroed; `:24, 212-319`, `odepack.f90:91-95`),
+  1e-12 on the `fac`-normalized intensity, its step capped at the ray's
+  smallest sample spacing, `:27, 218-339`; a failed ray is zeroed,
+  `odepack.f90:91-95`),
   `delo` and `formal` (with one Stokes component both are the same
-  trapezoid quadrature, `:182-189, 927-931`), `lsodasph` (polarized, "under
+  trapezoid quadrature, `:183-196, 994-998`), `lsodasph` (polarized, "under
   development"). `iname` maps to `r%iflag` in `rad_trans.f90:29-41`; with
-  `neq` ≠ 1 `explin` falls back to DELO. `lsoda` does not converge on these
-  rays (muchado L14, "Integrator checks left over from the sampling
-  study"; `history.tex`, "The lsoda integrator fails in optically thick
-  gas").
+  `neq` ≠ 1 `explin` falls back to DELO. `lsoda` integrates $j$ and
+  $\alpha$ linear between samples, the same model as `explin`'s sub-steps,
+  and agrees with the 4×-sample reference to ≤0.3% on the 128² frames tested
+  (≤1.4% at 64²), but a frame takes 1.46–1.50× as long (integration timed
+  separately, `verification_scripts/output/integrator_timing.txt`) and it once gave a silent +33% at 64² (one pixel above the
+  thermal bound; `integrator_check.py` flags such pixels), so it is the
+  check, not the production integrator.
 
 ## 10. Adaptive refinement
 
 Off by default (`raytrace_q6.REFINE = False`); on only with `explin` and one Stokes
-component (`grtrans_driver.f90:276-278`). `&refine` sets `refine_rtol`
+component (`grtrans_driver.f90:277-279`). `&refine` sets `refine_rtol`
 (1e-2), `refine_atol_frac` (1e-3), `refine_tau_cut` (20),
-`refine_max_depth` (6), `refine_max_points` (2000) (`read_inputs.f90:33-35,
+`refine_max_depth` (6), `refine_max_points` (2000, points added per ray
+and frequency) (`read_inputs.f90:33-35,
 72-78`).
 
-- **Triggers** on the original intervals (`grtrans_driver.f90:638-642`): $\Delta\tau>0.5$; a
+- **Triggers** on the original intervals (`grtrans_driver.f90:641-643`): $\Delta\tau>0.5$; a
   change of `harmonic_index` where the harmonics are separate
   ($n\le2/(e^2\Theta_e)$); a jump in $j$ or $\alpha$ by more than 10×.
-  `harmonic_index` (`:791-816`) reads `tcgs` as $\Theta_e$ for APERTURE and
-  as kelvin otherwise. Before 2026-10-15 it always read kelvin, so for
-  APERTURE every crossing of $\lfloor\nu/\nu_B\rfloor$ triggered a split; the
-  fix removes 32% of the added points on a relabeled 230 GHz frame (dump
-  500, $d=4$, $64^2$, 400 samples; flux $-0.05\%$) and hardly any at
-  1.6 MHz.
+  `harmonic_index` (`:777-802`) reads `tcgs` as $\Theta_e$ for APERTURE and
+  as kelvin otherwise. (History: `history.tex`, "refinement", 2026-10-15.)
 - **Each level** halves the active intervals, places new points on a cubic in
-  $\lambda$ through four neighbors (`:842-858`), evaluates the full fluid →
+  $\lambda$ through four neighbors (`:829-845`), evaluates the full fluid →
   frame → emissivity chain there, and keeps splitting where the two halves
-  change the interval's contribution by more than `rtol` (`:667-719`).
+  change the interval's contribution by more than `rtol` (`:646-713`).
   Intervals behind $\tau\ge$ `tau_cut` or below `atol_frac` of the total are
   dropped. Over budget, the intervals nearest the camera are kept.
 - **What it cannot find: a hot cell between two samples.** Every trigger is
@@ -478,13 +501,13 @@ component (`grtrans_driver.f90:276-278`). `&refine` sets `refine_rtol`
   is why refined traces from 200 samples reached only 0.23–0.73 of the
   converged flux there (`history.tex`, Stages 29, 31) and why production uses
   uniform sampling dense enough to touch the cells (`history.tex`, Stage 48).
-  Also, the point budget is $\max($`refine_max_points`$,$ `nn(3)`$)$, so at
-  `nn(3)` $\ge2000$ (2000 by default) refinement adds no points at all.
+  The point budget is the ray's own samples plus `refine_max_points`
+  (`grtrans_driver.f90:628`).
 - The image uses the refined points; the extras stay on the original ones
-  (`:629-630`). Rays with fewer than four points are not refined (the cubic
-  needs four; `:644-646`). Statistics (stdout and `refine.out` in the working
+  (`:712`, only `r%I` is replaced). Rays with fewer than four points are not refined (the cubic
+  needs four; `:627`). Statistics (stdout and `refine.out` in the working
   directory) are initialized and written by `grtrans_main`
-  (`pgrtrans.f90:171, 242`), so the f2py path writes them too.
+  (`pgrtrans.f90:171, 247`), so the f2py path writes them too.
 
 ## 11. Outputs and the extra quantities
 
@@ -493,7 +516,7 @@ file, one block per camera: `nx, ny, nvals+nextra`; `nkey=3`; three keys
 ($n_x$, $n_y$, $\nu$); `pixloc(2, nx·ny)` ($\alpha,\beta$ interleaved);
 `pixvals(nvals+nextra, nx·ny)` (float32). The blocks follow the camera
 index `(l-1)·nfreq·nparams + (m-1)·nfreq + k` (time $l$ slowest, then model
-parameter $m$, frequency $k$ fastest; `grtrans_driver.f90:443-459`); a run
+parameter $m$, frequency $k$ fastest; `grtrans_driver.f90:444-460`); a run
 over several binaries (`nfreq=1`) writes block $m$ for the $m$-th binary of
 the list. The pipeline's one decoder is
 `raytrace_q6.read_grtrans_image` (`pipeline/raytrace_q6.py:509-605`), which
@@ -507,7 +530,7 @@ another (`block=i`, 0-based) or for all (`block="all"`, a list);
 With `extra=1` each pixel carries 21 more values (`pgrtrans.f90:111-119`;
 7 if `nup=1`, which the reader does not expect). Each is a line-of-sight
 average weighted by $w=j\,e^{-\tau}$ (the invariant emissivity, attenuated
-toward the camera; `grtrans_driver.f90:318`):
+toward the camera; `grtrans_driver.f90:319`):
 $\langle q\rangle=\int wq\,d\lambda\big/\int w\,d\lambda$. Slot 1 is the total
 $\tau$; 7–14 are $\langle r\rangle$, $\langle\theta\rangle$,
 $\langle\phi\rangle$, $\langle n_e\rangle$, $\langle\Theta_e\rangle$,
@@ -528,18 +551,18 @@ Stage 62).
 
 | Case | Result |
 |---|---|
-| NaN in $j$ | `fac` is NaN, the ray is skipped: pixel and extras 0, but extra slot 2 = the ray's number of NaN samples; a "NaN in emissivity" line per ray and, after the ray loop, "WARNING: N ray(s) had a NaN emissivity" on stdout (`grtrans_driver.f90:202-207, 240, 429-436`; `pgrtrans.f90:233-235`). The pipeline captures stdout and does not read slot 2 (muchado L8-G4, pipeline side) |
-| NaN only in $\alpha$ | `explin` returns NaN, "NaN in integrate!" (`radtrans_integrate.f90:204-205`); the pipeline masks non-finite pixels (`raytrace_q6.py:1230-1260`) |
-| No samples / geodesic failure | pixel 0 (`grtrans_driver.f90:574-583`) |
+| NaN in $j$ | `fac` is NaN, the ray is skipped: pixel and extras 0, but extra slot 2 = the ray's number of NaN samples; a "NaN in emissivity" line per ray and, after the ray loop, "WARNING: N ray(s) had a NaN emissivity" on stdout (`grtrans_driver.f90:203-208, 241, 430-437`; `pgrtrans.f90:240-242`). The pipeline captures stdout and does not read slot 2 (muchado L8-G4, pipeline side) |
+| NaN only in $\alpha$ | `explin` returns NaN, "NaN in integrate!" (`radtrans_integrate.f90:211`); the pipeline masks non-finite pixels (`raytrace_q6.py:1230-1260`) |
+| No samples / geodesic failure | pixel 0 (`grtrans_driver.f90:575-584`) |
 | `lsoda` failure | ray zeroed (`odepack.f90:91-95`) |
 | Negative or too-hot pixels | not clipped in Fortran; masked by the pipeline (same lines) |
 
 ## 13. Threads
 
-The ray loop is `!$omp parallel do schedule(guided)` (`pgrtrans.f90:217-228`;
+The ray loop is `!$omp parallel do schedule(guided)` (`pgrtrans.f90:224-235`;
 `static,1` until 2026-10-17, about 5% slower: rays differ in cost).
 Each thread owns the module state `f, r, g, e, EXTRA_QUANTS, LBH, MBH`
-(`threadprivate`, `grtrans_driver.f90:45`), the index of the fluid binary it
+(`threadprivate`, `grtrans_driver.f90:46`), the index of the fluid binary it
 traces (`aperture_active`, `fluid_model_aperture.f90:108-109`; the binaries
 themselves are shared and only read) and the integrator's work arrays;
 pixels write their own columns. The table is loaded once in a critical
@@ -547,7 +570,7 @@ section (`jnu_table.f90:104-140`). The once-per-run flags `warned_hot` and
 `warned_cold` are read atomically and set in a critical section
 (`:168-205`); the hot-edge warning is reachable only with `THETA_SYNCH` set
 above the table's largest $\Theta_e$. The NaN-ray counter `nan_rays` is
-updated atomically (`grtrans_driver.f90:205-206`); it counts (ray, frequency, binary) triples, so a list run can count a ray more than once. `calc_emissivity`
+updated atomically (`grtrans_driver.f90:206-207`); it counts (ray, frequency, binary) triples, so a list run can count a ray more than once. `calc_emissivity`
 makes four work arrays of $352$ bytes per sample in all (1.1 MB at 3200
 samples, 9 MB at 25600; `emis.f90:473`). This gfortran build puts them on the
 heap, not the thread stack: traces at 25600, 65536 and 131072 samples (up to
@@ -701,14 +724,19 @@ upstream files and the added ones below).
 - **`emis.f90`:** the `JNUTABLE` emissivity type; `calc_opt_depth` as a
   running trapezoid.
 - **`grtrans_driver.f90`:** refinement (`refine_ray`, `refine_eval_points`,
-  `harmonic_index`, statistics); the `explin` hook; slot 1 = total $\tau$,
+  `harmonic_index`, statistics; its point budget counts added points); the `explin` hook; slot 1 = total $\tau$,
   slots 20/21; guards in the extras; the NaN-ray count and slot-2 flag; the
   `nvals=4` stop.
 - **`radtrans_integrate.f90`, `rad_trans.f90`:** the `explin` integrator
-  (`iflag=4`); `oatol` 1e-8 → 1e-30; `nextra` 21.
+  (`iflag=4`) with sub-steps across thick intervals; `lsoda`'s `oatol` 1e-8
+  → 1e-12 and its step capped at the sample spacing; `nextra` 21.
+- **`geokerr_wrapper.f`:** the λ-only mode of `GEOPHITIME` and `ELLPHITMU`
+  (§4), `geokerr_lambda_only_from_env`, `geokerr_set_lambda_only`.
 - **`read_inputs.f90`:** the `&refine` namelist. **`pgrtrans.f90`:**
   `nextra` 19 → 21 (7 still if `nup=1`); refinement statistics and the
-  NaN-ray summary (moved from `grtrans.f90` on 2026-10-15). **`grtrans_program.f90`:** longer file names.
+  NaN-ray summary (moved from `grtrans.f90` on 2026-10-15); the λ-only switch
+  before any geodesic of a call (the flag is a COMMON and outlives a call in
+  one Python session, so it is set again before slow light's $t_0$ pass). **`grtrans_program.f90`:** longer file names.
 - **`phys_constants.f90`:** CODATA 2018 constants, $M_\odot=1.98841\times10^{33}$ g.
 - **`fits.f90`:** no-op stubs (no cfitsio); **`Makefile`:** the new objects,
   no `-lcfitsio`.

@@ -17,11 +17,17 @@
     integer :: IS_LINEAR_STOKES = 1
     integer(kind=4) :: maxsteps = 100000
     integer, dimension(4) :: stats
-    ! oatol: LSODA absolute tolerance on the fac-normalized intensity.  1d-8
-    ! was far above the true normalized intensity in optically thick gas, so
-    ! LSODA accepted steps whose error exceeded the answer (negative and huge
-    ! pixels; history.tex, "The lsoda integrator fails in optically thick gas").
-    real(kind=8) :: ortol = 1d-6, oatol = 1d-30, hmax = 10, MAX_TAU, MAX_TAU_DEFAULT = 10d0, thin = 1d-2, sphtolfac=1d0
+    ! oatol: LSODA absolute tolerance on the fac-normalized intensity (of order
+    ! 1e-6..1e-2 for an emitting ray).  1d-8 was above the normalized intensity
+    ! in optically thick gas, so LSODA accepted steps whose error exceeded the
+    ! answer (history.tex, "The lsoda integrator fails in optically thick
+    ! gas"); 1d-30 could not be met where emission switches on abruptly while
+    ! I is still ~0, so LSODA ran out of steps and the pixel was set to 0.
+    ! 1d-12 does neither (docs/muchado.md L14, history.tex Stage 99).
+    real(kind=8) :: ortol = 1d-6, oatol = 1d-12, hmax = 10, MAX_TAU, MAX_TAU_DEFAULT = 10d0, thin = 1d-2, sphtolfac=1d0
+    ! explin sub-steps an interval of optical depth > EXPLIN_DTAU_SUB, with j
+    ! and K linear in s inside it (see radtrans_integrate_explin)
+    real(kind=8), parameter :: EXPLIN_DTAU_SUB = 0.02d0
 
 !$omp threadprivate(ss,tau,s0,jj,KK,intensity,lindx,nptstot,npts,nptsout,s,stats,stokesq,stokesu,stokesv)
 !$omp threadprivate(ortol,oatol,hmax,thin,MAX_TAU,QQ,PP,imm,OO,IS_LINEAR_STOKES,sphtolfac)
@@ -94,7 +100,7 @@
         if(present(oa)) then
            oatol = oa
         else
-           oatol = 1d-30   ! was 1d-8, see the declaration above
+           oatol = 1d-12   ! was 1d-8, then 1d-30; see the declaration above
         endif
         if(present(th)) then
            thin = th
@@ -217,6 +223,7 @@
         integer, dimension(:), allocatable :: inds
         real(kind=8) :: weight
         integer :: lamdex,i,ii,i1,i2,taudex
+        real(kind=8) :: hray
         i1=1; i2=nptstot
         I0 = 0d0
         if(maxval(tau).le.MAX_TAU) then
@@ -266,6 +273,19 @@
 ! try to figure out hmax:
         ss(1:npts)=s0(npts:1:-1)
         s(i1:i2)=s(i2:i1:-1)
+! LSODA evaluates j and K (linear between the ray points) only at its own
+! steps, so a step longer than a sample interval can pass over a narrow
+! emission spike unseen: cap the step at the ray's smallest sample spacing
+! (docs/muchado.md L14).
+        hray = hmax
+        if (i2 > i1) then
+           ! smallest positive spacing (coincident points would give 0, which
+           ! LSODA reads as no cap at all), floored at 1e-3 of the mean
+           ! spacing so a single tiny gap does not make the whole ray crawl
+           hray = min(hmax, max(minval(abs(s(i1+1:i2)-s(i1:i2-1)), &
+                mask=abs(s(i1+1:i2)-s(i1:i2-1)) > 0d0), &
+                1d-3*abs(s(i2)-s(i1))/(i2-i1)))
+        endif
 !        write(6,*) 'integrate s: ',minval(s), maxval(s), i1, i2, lamdex
 ! should make this the start of grtrans_integrate_lsoda and put everything else in general integrate subroutine since it's generic to all methods
         if(nequations==4) then
@@ -273,7 +293,7 @@
               call lsoda_basic(radtrans_lsoda_calc_rhs,I0(1:nequations), &
                    s(i1:i2),oatol, &
                    ortol,radtrans_lsoda_calc_jac,intensity(:,i1:i2), &
-                   1,maxsteps,stats,hmax=hmax)
+                   1,maxsteps,stats,hmax=hray)
            else
 ! spherical stokes under development
 !              I0=I0+I0sphmin
@@ -307,7 +327,7 @@
            call lsoda_basic(radtrans_lsoda_calc_rhs_npol, &
               I0(1:nequations),s(i1:i2),oatol, &
               ortol,radtrans_lsoda_calc_jac_npol,intensity(:,i1:i2), &
-              1,maxsteps,stats,hmax=hmax)
+              1,maxsteps,stats,hmax=hray)
         endif
         if(isnan(intensity(1,i2))) then
 !           write(6,*) 'NaN in integrate: ',i1,i2,s(i1:i2)
@@ -900,6 +920,12 @@
         ! avoids 0/0 where K -> 0); a thick interval contributes the source
         ! function at its camera-side point, attenuated to the camera.
         ! Total intensity only (RT_background.tex, "How to resolve the rays").
+        ! An interval thicker than EXPLIN_DTAU_SUB is split into
+        ! m = ceiling(D/EXPLIN_DTAU_SUB) sub-steps with j and K linear in s
+        ! inside it (tau then quadratic, ending at tau(i+1)); without this the
+        ! linear-in-tau source function of a single thick interval in which K
+        ! changes by orders of magnitude made the 16 and 160 MHz pair-plasma
+        ! images 3-12% too dim at 25600 samples (docs/muchado.md L14).
         real(kind=8), dimension(:), intent(in) :: s,j,K
         real(kind=8) :: d, ed, w0, w1, si, sj, total
         integer :: i, n
@@ -908,6 +934,10 @@
         do i = 1, n-1
            if (tau(i) > 700d0) exit                 ! exp(-tau) underflows
            d = tau(i+1) - tau(i)
+           if (d > EXPLIN_DTAU_SUB) then
+              call explin_substeps(total, tau(i), d, abs(s(i+1)-s(i)), j(i), j(i+1), K(i), K(i+1))
+              cycle
+           endif
            if (d < 1d-4) then
               total = total + 0.5d0*abs(s(i+1)-s(i)) &
                    *(j(i)*exp(-tau(i)) + j(i+1)*exp(-tau(i+1)))
@@ -923,6 +953,43 @@
         enddo
         intensity(1,:) = total
       end subroutine radtrans_integrate_explin
+
+      subroutine explin_substeps(total, tau0, d, ds, j1, j2, k1, k2)
+        ! Add to total the contribution of one interval of optical depth d >
+        ! EXPLIN_DTAU_SUB, length ds, coefficients j1, j2, k1, k2 at its ends
+        ! (camera side first) and camera-side optical depth tau0 (0: the
+        ! interval's own contribution, unattenuated), split into
+        ! m = ceiling(d/EXPLIN_DTAU_SUB) sub-steps (at most 1e5) with j and K
+        ! linear in s inside it (tau quadratic, ending at tau0 + d).  Used by
+        ! radtrans_integrate_explin and by the refinement (grtrans_driver
+        ! refine_ray), so both integrate a thick interval the same way.
+        real(kind=8), intent(inout) :: total
+        real(kind=8), intent(in) :: tau0, d, ds, j1, j2, k1, k2
+        real(kind=8) :: wa, wb, ta, tb, ja, jb, ka, kb, dd, kav, ed, w0, w1, si, sj
+        integer :: m, q
+        ! the count is clamped in real arithmetic: ceiling() of a huge d/0.02
+        ! overflows a default integer (negative m, the interval dropped)
+        m = ceiling(min(d/EXPLIN_DTAU_SUB, 1d5))
+        kav = 0.5d0*(abs(k1)+abs(k2))
+        do q = 1, m
+           wa = dble(q-1)/m; wb = dble(q)/m
+           ka = (1d0-wa)*abs(k1) + wa*abs(k2); kb = (1d0-wb)*abs(k1) + wb*abs(k2)
+           ja = (1d0-wa)*j1 + wa*j2;           jb = (1d0-wb)*j1 + wb*j2
+           ta = tau0 + d*(abs(k1)*wa + 0.5d0*(abs(k2)-abs(k1))*wa*wa)/kav
+           tb = tau0 + d*(abs(k1)*wb + 0.5d0*(abs(k2)-abs(k1))*wb*wb)/kav
+           if (ta > 700d0) exit
+           dd = tb - ta
+           if (dd < 1d-4) then
+              total = total + 0.5d0*ds/m*(ja*exp(-ta) + jb*exp(-tb))
+           else
+              ed = exp(-dd); w0 = 1d0 - ed; w1 = (1d0 - ed - dd*ed)/dd
+              si = 0d0; sj = 0d0
+              if (ka > 0d0) si = ja/ka
+              if (kb > 0d0) sj = jb/kb
+              total = total + exp(-ta)*(si*(w0 - w1) + sj*w1)
+           endif
+        enddo
+      end subroutine explin_substeps
 
       subroutine radtrans_integrate_quadrature(s,j,K)
         real(kind=8), dimension(:), intent(in) :: s,j,K

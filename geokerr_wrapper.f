@@ -1710,6 +1710,8 @@ c (2.41) Carlson (1992)
       integer tpm,tpr,ncase,p(5)
 c firstpt is a boolean variable indicating if we need to calculate integrals involving only the initial and turning points.
       logical firstpt
+      logical lamonly
+      common /geolam/ lamonly
       PARAMETER ( one=1.d0, two=2.d0 )
       pi=acos(-one)
       pi2=two*pi
@@ -1729,6 +1731,13 @@ c Eq. (22)
       a2=sm*(-one)**tpm
 c Eq. (35)
       a3=two*int((two*dble(tpm)+3.d0-sm)/4.d0)-one
+c lambda-only mode (grtrans, axisymmetric fast light): t and phi are not needed, so their
+c third-kind integrals are skipped; lambda is computed exactly as before.
+      if(lamonly) then
+        tu02=0.d0; tu03=0.d0; tu04=0.d0; tu12=0.d0; tu13=0.d0; tu14=0.d0
+        phiu01=0.d0; phiu02=0.d0; phiu11=0.d0; phiu12=0.d0
+        tu2=0.d0; tu3=0.d0; tu4=0.d0; phiu1=0.d0; phiu2=0.d0
+      endif
       if(ncase.eq.0) then
         tu=0.d0
         phiu=0.d0
@@ -1751,9 +1760,9 @@ c Table 1 Row 1
           if(firstpt.and.(u0.ne.u2)) then
             p(4)=-2
 c First three u0 integrals in Eq. (47)
-            phiu01=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-one/uplus,rffu0,u0,u2)
-            phiu02=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-umi,rffu0,u0,u2)
-            tu02=ellcubicreal(p,-u1,one,u2,-one,u3,-one,0.d0,one,rffu0,u0,u2)
+            if(.not.lamonly) phiu01=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-one/uplus,rffu0,u0,u2)
+            if(.not.lamonly) phiu02=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-umi,rffu0,u0,u2)
+            if(.not.lamonly) tu02=ellcubicreal(p,-u1,one,u2,-one,u3,-one,0.d0,one,rffu0,u0,u2)
             tu03=phiu01
             tu04=phiu02
             p(4)=-4
@@ -1773,9 +1782,9 @@ c Fourth u0 integral in Eq. (47)
           if(abs(uf-u2).gt.1d-16) then
             p(4)=-2
 c First three uf integrals in Eq. (47)
-            phiu11=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-one/uplus,rffu1,uf,u2)
-            phiu12=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-umi,rffu1,uf,u2)
-            tu12=ellcubicreal(p,-u1,one,u2,-one,u3,-one,0.d0,one,rffu1,uf,u2)
+            if(.not.lamonly) phiu11=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-one/uplus,rffu1,uf,u2)
+            if(.not.lamonly) phiu12=ellcubicreal(p,-u1,one,u2,-one,u3,-one,one,-umi,rffu1,uf,u2)
+            if(.not.lamonly) tu12=ellcubicreal(p,-u1,one,u2,-one,u3,-one,0.d0,one,rffu1,uf,u2)
             tu13=phiu11
             tu14=phiu12
             p(4)=-4
@@ -1812,9 +1821,9 @@ c Table 1 Row 2
           if(firstpt.and.(u0.ne.u3)) then
             p(4)=-2
 c First three u0 integrals in Eq. (47)
-            phiu01=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-one/uplus,rffu0,u3,u0)
-            phiu02=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-umi,rffu0,u3,u0)
-            tu02=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,0.d0,one,rffu0,u3,u0)
+            if(.not.lamonly) phiu01=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-one/uplus,rffu0,u3,u0)
+            if(.not.lamonly) phiu02=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-umi,rffu0,u3,u0)
+            if(.not.lamonly) tu02=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,0.d0,one,rffu0,u3,u0)
             tu03=phiu01
             tu04=phiu02
 c Fourth u0 integral in Eq. (47)
@@ -1834,9 +1843,9 @@ c Fourth u0 integral in Eq. (47)
           if(uf.ne.u3) then
             p(4)=-2
 c First three uf integrals in Eq. (47)
-            phiu11=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-one/uplus,rffu1,u3,uf)
-            phiu12=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-umi,rffu1,u3,uf)
-            tu12=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,0.d0,one,rffu1,u3,uf)
+            if(.not.lamonly) phiu11=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-one/uplus,rffu1,u3,uf)
+            if(.not.lamonly) phiu12=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,one,-umi,rffu1,u3,uf)
+            if(.not.lamonly) tu12=-ellcubicreal(p,-u1,one,-u2,one,-u3,one,0.d0,one,rffu1,u3,uf)
             tu13=phiu11
             tu14=phiu12
             p(4)=-4
@@ -1882,9 +1891,9 @@ c Fourth integral in Eq. (47)
           tu1=ellcubiccomplex(p,-u1,one,0.d0,one,f,g,h,rffu0,u0,uf)
           p(4)=-2
 c First three integrals in Eq. (47)
-          tu2=ellcubiccomplex(p,-u1,one,0.d0,one,f,g,h,rffu0,u0,uf)
-          tu3=ellcubiccomplex(p,-u1,one,one,-one/uplus,f,g,h,rffu0,u0,uf)
-          tu4=ellcubiccomplex(p,-u1,one,one,-umi,f,g,h,rffu0,u0,uf)
+          if(.not.lamonly) tu2=ellcubiccomplex(p,-u1,one,0.d0,one,f,g,h,rffu0,u0,uf)
+          if(.not.lamonly) tu3=ellcubiccomplex(p,-u1,one,one,-one/uplus,f,g,h,rffu0,u0,uf)
+          if(.not.lamonly) tu4=ellcubiccomplex(p,-u1,one,one,-umi,f,g,h,rffu0,u0,uf)
 c Eq. (47)
           tu=su*ur/sqrt(dd)*((umi-one/uplus)*tu1+(umi**2-one/uplus**2)*tu2-
      *       (2.d0*a*(a-l)+a**2/uplus+one/uplus**3)*tu3+
@@ -1901,9 +1910,9 @@ c Fourth integral in Eq. (47)
           tu1=-ellcubiccomplex(p,-u1,one,0.d0,one,f,g,h,rffu0,uf,u0)
           p(4)=-2
 c First three integrals in Eq. (47)
-          tu2=-ellcubiccomplex(p,-u1,one,0.d0,one,f,g,h,rffu0,uf,u0)
-          tu3=-ellcubiccomplex(p,-u1,one,one,-one/uplus,f,g,h,rffu0,uf,u0)
-          tu4=-ellcubiccomplex(p,-u1,one,one,-umi,f,g,h,rffu0,uf,u0)
+          if(.not.lamonly) tu2=-ellcubiccomplex(p,-u1,one,0.d0,one,f,g,h,rffu0,uf,u0)
+          if(.not.lamonly) tu3=-ellcubiccomplex(p,-u1,one,one,-one/uplus,f,g,h,rffu0,uf,u0)
+          if(.not.lamonly) tu4=-ellcubiccomplex(p,-u1,one,one,-umi,f,g,h,rffu0,uf,u0)
 c Eq. (47)
           tu=su*ur/sqrt(dd)*((umi-one/uplus)*tu1+(umi**2-one/uplus**2)*tu2-
      *       (2.d0*a*(a-l)+a**2/uplus+one/uplus**3)*tu3+
@@ -1988,9 +1997,9 @@ c Fourth integral in Eq. (47)
           tu1=ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,0.d0,one,f,g,h,rffu0,u0,uf)
           p(5)=-2
 c First three integrals in Eq. (47)
-          tu2=ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,0.d0,one,f,g,h,rffu0,u0,uf)
-          tu3=ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-one/uplus,f,g,h,rffu0,u0,uf)
-          tu4=ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-umi,f,g,h,rffu0,u0,uf)
+          if(.not.lamonly) tu2=ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,0.d0,one,f,g,h,rffu0,u0,uf)
+          if(.not.lamonly) tu3=ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-one/uplus,f,g,h,rffu0,u0,uf)
+          if(.not.lamonly) tu4=ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-umi,f,g,h,rffu0,u0,uf)
 c Eq. (47)
           tu=su*ur/sqrt(-qs*ee)*((umi-one/uplus)*tu1+(umi**2-one/uplus**2)*tu2-
      *       (2.d0*a*(a-l)+a**2/uplus+one/uplus**3)*tu3+
@@ -2008,9 +2017,9 @@ c Fourth integral in Eq. (47)
           tu1=-ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,0.d0,one,f,g,h,rffu0,uf,u0)
           p(5)=-2
 c First three integrals in Eq. (47)
-          tu2=-ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,0.d0,one,f,g,h,rffu0,uf,u0)
-          tu3=-ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-one/uplus,f,g,h,rffu0,uf,u0)
-          tu4=-ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-umi,f,g,h,rffu0,uf,u0)
+          if(.not.lamonly) tu2=-ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,0.d0,one,f,g,h,rffu0,uf,u0)
+          if(.not.lamonly) tu3=-ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-one/uplus,f,g,h,rffu0,uf,u0)
+          if(.not.lamonly) tu4=-ellquarticcomplex(p,-u1,one,u4*qs,-one*qs,one,-umi,f,g,h,rffu0,uf,u0)
 c Eq. (47)
           tu=su*ur/sqrt(-qs*ee)*((umi-one/uplus)*tu1+(umi**2-one/uplus**2)*tu2-
      *       (2.d0*a*(a-l)+a**2/uplus+one/uplus**3)*tu3+
@@ -2042,9 +2051,9 @@ c Fourth integral in Eq. (47)
           tu1=elldoublecomplex(p,f1,g1,h1,f2,g2,h2,0.d0,one,rffu0,u0,uf)
           p(5)=-2
 c First three integrals in Eq. (47)
-          tu2=elldoublecomplex(p,f1,g1,h1,f2,g2,h2,0.d0,one,rffu0,u0,uf)
-          tu3=elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-one/uplus,rffu0,u0,uf)
-          tu4=elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-umi,rffu0,u0,uf)
+          if(.not.lamonly) tu2=elldoublecomplex(p,f1,g1,h1,f2,g2,h2,0.d0,one,rffu0,u0,uf)
+          if(.not.lamonly) tu3=elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-one/uplus,rffu0,u0,uf)
+          if(.not.lamonly) tu4=elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-umi,rffu0,u0,uf)
 c Minus sign in phi components is from flipping the sign of the u/u_\pm-1 factor to keep arguments positive.
           phiu0=-tu3
           phiu1=-tu4
@@ -2062,9 +2071,9 @@ c Fourth integral in Eq. (47)
           tu1=-elldoublecomplex(p,f1,g1,h1,f2,g2,h2,0.d0,one,rffu0,uf,u0)
           p(5)=-2
 c First three integrals in Eq. (47)
-          tu2=-elldoublecomplex(p,f1,g1,h1,f2,g2,h2,0.d0,one,rffu0,uf,u0)
-          tu3=-elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-one/uplus,rffu0,uf,u0)
-          tu4=-elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-umi,rffu0,uf,u0)
+          if(.not.lamonly) tu2=-elldoublecomplex(p,f1,g1,h1,f2,g2,h2,0.d0,one,rffu0,uf,u0)
+          if(.not.lamonly) tu3=-elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-one/uplus,rffu0,uf,u0)
+          if(.not.lamonly) tu4=-elldoublecomplex(p,f1,g1,h1,f2,g2,h2,one,-umi,rffu0,uf,u0)
 c Minus sign in phi components is from flipping the sign of the u/u_\pm-1 factor to keep arguments positive.
           phiu0=-tu3
           phiu1=-tu4
@@ -2090,9 +2099,9 @@ c These are the equal roots quartic cases
 c Table 1 Row 7
               p(5)=-2
 c First three integrals in Eq. (47)
-              phiu1=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu0,u0,uf)
-              phiu2=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu0,u0,uf)
-              tu2=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu0,u0,uf)
+              if(.not.lamonly) phiu1=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu0,u0,uf)
+              if(.not.lamonly) phiu2=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu0,u0,uf)
+              if(.not.lamonly) tu2=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu0,u0,uf)
               tu3=phiu1
               tu4=phiu2
               p(5)=-4
@@ -2101,9 +2110,9 @@ c Fourth integral in Eq. (47)
             elseif(u0.gt.u3) then 
 c Table 1 Row 8
 c First three integrals in Eq. (47)
-              phiu1=ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu0,u0,uf)
-              phiu2=ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu0,u0,uf)
-              tu2=ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu0,u0,uf)
+              if(.not.lamonly) phiu1=ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu0,u0,uf)
+              if(.not.lamonly) phiu2=ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu0,u0,uf)
+              if(.not.lamonly) tu2=ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu0,u0,uf)
               tu3=phiu1
               tu4=phiu2
               p(5)=-4
@@ -2130,9 +2139,9 @@ c Eq. (49)
 c Table 1 Row 7
               p(5)=-2
 c First three integrals in Eq. (47)
-              phiu1=-ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu0,uf,u0)
-              phiu2=-ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu0,uf,u0)
-              tu2=-ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu0,uf,u0)
+              if(.not.lamonly) phiu1=-ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu0,uf,u0)
+              if(.not.lamonly) phiu2=-ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu0,uf,u0)
+              if(.not.lamonly) tu2=-ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu0,uf,u0)
               tu3=-phiu1
               tu4=-phiu2
               p(5)=-4
@@ -2142,9 +2151,9 @@ c Fourth integral in Eq. (47)
 c Table 1 Row 8
               p(5)=-2
 c First three integrals in Eq. (47)
-              phiu1=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu0,uf,u0)
-              phiu2=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu0,uf,u0)
-              tu2=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu0,uf,u0)
+              if(.not.lamonly) phiu1=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu0,uf,u0)
+              if(.not.lamonly) phiu2=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu0,uf,u0)
+              if(.not.lamonly) tu2=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu0,uf,u0)
               tu3=-phiu1
               tu4=-phiu2
               p(5)=-4
@@ -2178,9 +2187,9 @@ c Table 1 Row 7
 c Only compute integrals involving u0 once per geodesic
             p(5)=-2
 c First three u0 integrals in Eq. (47)
-            phiu01=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu0,u0,u2)
-            phiu02=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu0,u0,u2)
-            tu02=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu0,u0,u2)
+            if(.not.lamonly) phiu01=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu0,u0,u2)
+            if(.not.lamonly) phiu02=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu0,u0,u2)
+            if(.not.lamonly) tu02=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu0,u0,u2)
             tu03=phiu01
             tu04=phiu02
             p(5)=-4
@@ -2200,9 +2209,9 @@ c Fourth u0 integral in Eq. (48)
           if(abs(uf-u2).gt.1d-12) then
             p(5)=-2
 c First three uf integrals in Eq. (47)
-            phiu11=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu1,uf,u2)
-            phiu12=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu1,uf,u2)
-            tu12=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu1,uf,u2)
+            if(.not.lamonly) phiu11=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-one/uplus,rffu1,uf,u2)
+            if(.not.lamonly) phiu12=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,one,-umi,rffu1,uf,u2)
+            if(.not.lamonly) tu12=ellquarticreal(p,-u1,one,u2,-one,u3,-one,u4,-one,0.d0,one,rffu1,uf,u2)
             tu13=phiu11
             tu14=phiu12
             p(5)=-4
@@ -2236,9 +2245,9 @@ c Eq. (49)
           if(firstpt.and.(u0.ne.u3)) then
             p(5)=-2
 c First three u0 integrals in Eq. (47)
-            phiu01=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu0,u3,u0)
-            phiu02=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu0,u3,u0)
-            tu02=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu0,u3,u0)
+            if(.not.lamonly) phiu01=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu0,u3,u0)
+            if(.not.lamonly) phiu02=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu0,u3,u0)
+            if(.not.lamonly) tu02=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu0,u3,u0)
             tu03=phiu01
             tu04=phiu02
             p(5)=-4
@@ -2258,9 +2267,9 @@ c Fourth u0 integral in Eq. (47)
           if(uf.ne.u3) then
             p(5)=-2
 c First three uf integrals in Eq. (47)
-            phiu11=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu1,u3,uf)
-            phiu12=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu1,u3,uf)
-            tu12=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu1,u3,uf)
+            if(.not.lamonly) phiu11=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-one/uplus,rffu1,u3,uf)
+            if(.not.lamonly) phiu12=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,one,-umi,rffu1,u3,uf)
+            if(.not.lamonly) tu12=-ellquarticreal(p,-u1,one,-u2,one,-u3,one,u4,-one,0.d0,one,rffu1,u3,uf)
             tu13=phiu11
             tu14=phiu12
             p(5)=-4
@@ -2538,7 +2547,10 @@ c Eq. (46) for the muf term.
       double precision phi0,phif,m1,n,ellpif,ellpi0,ellpic,elle0,ellef,ellec
       double precision pi,s0,sf,ak,q0,qf,rf0,rff,rfc,rj0,rjf,rjc,rd0,rdf,rdc
       logical firstpt
+      logical lamonly
+      common /geolam/ lamonly
       pi=acos(-1.d0)
+      if(lamonly) rjc=0.d0
 c Convert to argument k from complimentary parameter m1
       ak=sqrt(1.d0-m1)
 c First do mu0, muplus components if they haven't already been calculated:
@@ -2551,7 +2563,7 @@ c Compute Carlson integrals for Legendre's of the 2nd kind using Press et al (19
         elle0=s0*(rf0-((s0*ak)**2)*rd0/3.d0)
         ellec=2.d0*(rfc-ak*ak*rdc/3.d0)
 c n only equals 1 if it was set that way, in which case the phi terms are zero.
-        if(n.ne.1.d0) then
+        if(n.ne.1.d0.and..not.lamonly) then
 c Now handle Legendre's 3rd from Press et al (1992) 6.11.21:
           rj0=rj(1.d0-s0*s0,q0,1.d0,1.d0-n*s0*s0)
           rjc=rj(0.d0,m1,1.d0,1.d0-n)
@@ -2573,7 +2585,7 @@ c Repeat procedure for muf part:
       qf=(1.d0-sf*ak)*(1.d0+sf*ak)
       rdf=rd(1.d0-sf*sf,qf,1.d0)
       ellef=sf*(rff-((sf*ak)**2)*rdf/3.d0)
-      if(n.ne.1.d0) then
+      if(n.ne.1.d0.and..not.lamonly) then
         rjf=rj(1.d0-sf*sf,qf,1.d0,1.d0-n*sf*sf)
         ellpif=sf*(rff+n*sf*sf*rjf/3.d0)
       else
@@ -3760,3 +3772,32 @@ c Table 2 Row 8
         if (p.le.0.d0) rj=a*(b*rj+3.d0*(rcx-rf(xt,yt,zt)))
       return
       END
+
+      block data geolamdef
+      logical lamonly
+      common /geolam/ lamonly
+      data lamonly /.false./
+      end
+
+      subroutine geokerr_lambda_only_from_env(allowed)
+c Lambda-only mode where the caller allows it (the axisymmetric APERTURE
+c fluid with fast light), unless the environment variable GRT_GEODESIC_FULL
+c is set to a non-empty value (t and phi are then computed).  Called by
+c grtrans_main before the mu loop, so before any geodesic (a plain call,
+c which f2py can wrap).
+      logical allowed
+      character*8 ev
+      integer lnv
+      call get_environment_variable('GRT_GEODESIC_FULL', ev, lnv)
+      call geokerr_set_lambda_only(allowed .and. lnv.eq.0)
+      return
+      end
+
+      subroutine geokerr_set_lambda_only(flag)
+c Lambda-only mode of GEOPHITIME (see geolamdef): set before any geodesic.
+      logical flag
+      logical lamonly
+      common /geolam/ lamonly
+      lamonly=flag
+      return
+      end

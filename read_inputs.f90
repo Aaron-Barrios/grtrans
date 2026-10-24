@@ -29,7 +29,7 @@
       ! namelist in inputs.in switches it on and sets the accuracy target
       ! (refine_rtol, refine_atol_frac), the region worth refining
       ! (refine_tau_cut) and the hard caps (refine_max_depth bisections of each
-      ! original interval, refine_max_points points per ray and frequency).
+      ! original interval, refine_max_points points added per ray and frequency).
       logical :: refine_on=.false.
       real(kind=8) :: refine_rtol=1d-2, refine_atol_frac=1d-3, refine_tau_cut=20d0
       integer :: refine_max_depth=6, refine_max_points=2000

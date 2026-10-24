@@ -184,6 +184,13 @@
             if(nup.eq.1.and.nvals.eq.4) call load_chandra_tab24()
             write(6,*) 'mu loop: ',nro,nphi,nup,standard,nmu
             write(6,*) 'mu loop: ',mu0
+            ! geokerr computes only the affine parameter, not t and phi, for the
+            ! axisymmetric APERTURE fluid with fast light (nload = 1), unless
+            ! GRT_GEODESIC_FULL is set (muchado.md L14); lambda is unchanged bit
+            ! for bit.  Other models and slow light read phi and t.  Set before
+            ! any geodesic (the t0 pass of slow light too): the flag is a COMMON
+            ! and outlives a call in one Python session.
+            call geokerr_lambda_only_from_env(fname=='APERTURE' .and. nload==1)
             do j=1,nmu
                call initialize_geokerr_args(gargs,nro*nphi)
                call initialize_pixels(gargs,use_geokerr,standard,mu0(j),phi0,spin,uout,uin, &

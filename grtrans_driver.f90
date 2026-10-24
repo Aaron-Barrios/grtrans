@@ -21,6 +21,7 @@
        use grtrans_inputs, only: refine_on, refine_rtol, refine_atol_frac, &
             refine_tau_cut, refine_max_depth, refine_max_points
        use chandra_tab24, only: interp_chandra_tab24
+       use radtrans_integrate, only: explin_substeps, EXPLIN_DTAU_SUB
        use radtrans_integrate, only: integrate, del_radtrans_integrate_data, &
             init_radtrans_integrate_data, intensity
        use fluid_model_aperture, only: naperture, select_aperture_binary
@@ -624,7 +625,8 @@
          n0=g%npts
          ! the cubic of refine_eval_points needs four points (i0 = n0-3 >= 1)
          if (n0 < 4) return
-         cap=max(refine_max_points,n0)
+         cap=n0+refine_max_points        ! points ADDED per ray (was max(refine_max_points,n0),
+                                         ! which left no room once nn(3) > refine_max_points)
          allocate(lam(cap),jv(cap),kv(cap),tv(cap),cold(cap),bix(cap),act(cap))
          allocate(hv(n0))
          n=n0
@@ -730,11 +732,15 @@
 
            function local_term(la,lb,ja,jb,ka,kb) result(c)
 ! explin contribution of one interval without the camera-side attenuation
-! (radtrans_integrate_explin).
+! (radtrans_integrate_explin, with its sub-steps across an interval thicker
+! than EXPLIN_DTAU_SUB: the same routine, explin_substeps).
            real(kind=8), intent(in) :: la,lb,ja,jb,ka,kb
            real(kind=8) :: c,d,ed,w0,w1,sa,sb
            d=0.5d0*abs(lb-la)*(ka+kb)
-           if (d < 1d-4) then
+           if (d > EXPLIN_DTAU_SUB) then
+              c=0d0
+              call explin_substeps(c,0d0,d,abs(lb-la),ja,jb,ka,kb)
+           elseif (d < 1d-4) then
               c=0.5d0*abs(lb-la)*(ja+jb*exp(-d))
            else
               ed=exp(-d); w0=1d0-ed; w1=(1d0-ed-d*ed)/d
