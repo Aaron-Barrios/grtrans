@@ -19,6 +19,10 @@
 !   * bmag = |b| = sqrt(b^mu b_mu), code units: the binary's bmag array is
 !     skipped when reading; aperture_vals takes |b| from the interpolated b^mu
 !     (see below).
+!   * u^mu is the electrons' mean velocity: the electron current n_e u^mu is
+!     interpolated and divided by the interpolated n_e (since 2026-10-27,
+!     muchado.md L26; before, u^mu itself was interpolated, and a hot dense
+!     cell's electrons could take the velocity of a nearly empty neighbor).
 !   * Interpolated u^mu is renormalized to u.u = -1 and b^mu projected
 !     orthogonal to it.  A weighted average of unit timelike vectors pointing
 !     in different directions is not a unit vector (|u.u| > 1), so bilinear
@@ -83,6 +87,9 @@
          ! binary was cut per cell by the writer, or not at all)
          real(kind=8) :: point_sigcut = 0d0
          real(kind=8), dimension(:), allocatable :: r_arr, th_arr
+         ! ln r_arr(1) and the inverse mean steps in ln r and theta, for the
+         ! O(1) first guess of grid_interval
+         real(kind=8) :: lr1 = 0d0, dlr_inv = 0d0, dth_inv = 0d0
          real(kind=8), dimension(:), allocatable :: n_e, theta_e
          real(kind=8), dimension(:), allocatable :: u0, u1, u2, u3
          real(kind=8), dimension(:), allocatable :: b0, b1, b2, b3
@@ -180,6 +187,9 @@
         read(8) skip
         read(8) bn%beta_arr, bn%sigma_arr
         deallocate(skip)
+        bn%lr1 = log(bn%r_arr(1))
+        bn%dlr_inv = dble(nrr-1) / (log(bn%r_arr(nrr)) - bn%lr1)
+        bn%dth_inv = dble(nthh-1) / (bn%th_arr(nthh) - bn%th_arr(1))
         bn%point_sigcut = 0d0
         if (magic == int(z'41504C38')) read(8) bn%point_sigcut
         close(8)
@@ -291,23 +301,25 @@
         aperture_mass_ratio = abins(aperture_active)%mass_ratio
         end function aperture_mass_ratio
 
-        ! Bisection bracket: return idx in [1, n-1] with xx(idx) <= x < xx(idx+1)
-        subroutine bracket(xx, n, x, idx)
+        ! The interval idx in [1, n-1] with xx(idx) <= x < xx(idx+1) (idx = n-1
+        ! at x = xx(n)), for xx(1) <= x <= xx(n) and an increasing xx: a first
+        ! guess from the axis's mean step (f = (x - xx(1)) * step_inv; the axes
+        ! are uniform in ln r and theta up to rounding), then moved to the
+        ! interval that holds x.  The same interval as bisection, in O(1).
+        subroutine grid_interval(xx, n, x, f, idx)
         integer, intent(in) :: n
-        real(kind=8), intent(in) :: xx(n), x
+        real(kind=8), intent(in) :: xx(n), x, f
         integer, intent(out) :: idx
-        integer :: lo, hi, mid
-        lo = 1; hi = n
-        do while (hi - lo > 1)
-           mid = (lo + hi) / 2
-           if (xx(mid) <= x) then
-              lo = mid
-           else
-              hi = mid
-           endif
+        idx = max(1, min(int(f) + 1, n-1))
+        do while (idx < n-1)
+           if (xx(idx+1) > x) exit
+           idx = idx + 1
         enddo
-        idx = max(1, min(lo, n-1))
-        end subroutine bracket
+        do while (idx > 1)
+           if (xx(idx) <= x) exit
+           idx = idx - 1
+        enddo
+        end subroutine grid_interval
 
         ! Interpolation as Aperture4 does it (utils/interpolation.hpp, interp_t<1>
         ! in coord_policy_gr_ks_sph.hpp): first order (cloud-in-cell) in the
@@ -318,16 +330,18 @@
         !   * n_e and the electron pressure n_e theta_e are interpolated, and
         !     theta_e = <n_e theta_e>/<n_e> (a cell without electrons adds
         !     nothing to either, instead of pulling theta_e toward 0);
-        !   * u^mu and b^mu component by component (then u renormalized and b
-        !     projected orthogonal to it), and |b| from the interpolated b^mu,
-        !     not an interpolated |b|;
+        !   * u^mu as the electron current n_e u^mu divided by the interpolated
+        !     n_e (the electrons' mean velocity, as theta_e is their mean
+        !     temperature; muchado.md L26), b^mu component by component (then u
+        !     renormalized and b projected orthogonal to it), and |b| from the
+        !     interpolated b^mu, not an interpolated |b|;
         !   * no validity gate and no renormalization of the weights, as in
         !     Aperture's block means: invalid cells (no timelike current) are
         !     zero in every quantity; electron-free cells and sigma-masked
-        !     cells (cell mode) count as zero only in n_e and n_e theta_e and
-        !     keep a velocity and field (the pair fluid's, or the electrons'),
-        !     which enter neighboring points.
-        ! beta_p and sigma (diagnostics) are interpolated as given.
+        !     cells (cell mode) count as zero in n_e, n_e theta_e and n_e u^mu
+        !     and keep a field, which enters neighboring points.
+        ! beta_p and sigma (diagnostics) are averaged over the corners that hold
+        ! fluid (sigma_arr > 0), with the weights renormalized over them.
         subroutine aperture_vals(x0, a, rho, p, b, u, bmag, beta, sigma)
         type (four_Vector), intent(in), dimension(:) :: x0
         real, intent(in) :: a
@@ -338,12 +352,13 @@
         type (four_Vector), intent(out), dimension(size(x0)) :: u, b
         integer :: npts, i, lr, ur, lth, uth, k00, k01, k10, k11
         real(kind=8) :: rq, thq, rd, td, w00, w01, w10, w11
-        real(kind=8) :: ne_i, pe_i, sw, ss, bs
+        real(kind=8) :: ne_i, pe_i, sw, ss, bs, wn00, wn01, wn10, wn11
         real(kind=8) :: rmin, rmax, thmin, thmax, rlo, rhi, thlo, thhi
         type (four_Vector), dimension(size(x0)) :: u_ks, b_ks
         real(kind=8), dimension(size(x0)) :: rr, tth
         logical, dimension(size(x0)) :: filled
         real(kind=8) :: uu, ub, bb
+        real(kind=8), dimension(size(x0),10) :: metric
 
         ! the calling thread's binary (select_aperture_binary)
         associate (bn => abins(aperture_active))
@@ -386,8 +401,8 @@
            endif
            rq = min(max(rq, rmin), rmax)
            thq = min(max(thq, thmin), thmax)
-           call bracket(r_arr, nr, rq, lr);  ur = lr + 1
-           call bracket(th_arr, nth, thq, lth); uth = lth + 1
+           call grid_interval(r_arr, nr, rq, (log(rq) - bn%lr1)*bn%dlr_inv, lr);  ur = lr + 1
+           call grid_interval(th_arr, nth, thq, (thq - thmin)*bn%dth_inv, lth); uth = lth + 1
            ! linear in x1 = ln r and x2 = theta (Aperture's cell coordinates)
            rd = log(rq / r_arr(lr)) / log(r_arr(ur) / r_arr(lr))
            td = (thq - th_arr(lth)) / (th_arr(uth) - th_arr(lth))
@@ -449,10 +464,12 @@
            rho(i) = real(ne_i)
            p(i)   = real(max(pe_i, 0d0) / ne_i)
 
-           u_ks(i)%data(1) = w00*u0(k00) + w01*u0(k01) + w10*u0(k10) + w11*u0(k11)
-           u_ks(i)%data(2) = w00*u1(k00) + w01*u1(k01) + w10*u1(k10) + w11*u1(k11)
-           u_ks(i)%data(3) = w00*u2(k00) + w01*u2(k01) + w10*u2(k10) + w11*u2(k11)
-           u_ks(i)%data(4) = w00*u3(k00) + w01*u3(k01) + w10*u3(k10) + w11*u3(k11)
+           ! the electron current n_e u^mu over n_e (ne_i > 0 here)
+           wn00 = w00*n_e(k00); wn01 = w01*n_e(k01); wn10 = w10*n_e(k10); wn11 = w11*n_e(k11)
+           u_ks(i)%data(1) = (wn00*u0(k00) + wn01*u0(k01) + wn10*u0(k10) + wn11*u0(k11))/ne_i
+           u_ks(i)%data(2) = (wn00*u1(k00) + wn01*u1(k01) + wn10*u1(k10) + wn11*u1(k11))/ne_i
+           u_ks(i)%data(3) = (wn00*u2(k00) + wn01*u2(k01) + wn10*u2(k10) + wn11*u2(k11))/ne_i
+           u_ks(i)%data(4) = (wn00*u3(k00) + wn01*u3(k01) + wn10*u3(k10) + wn11*u3(k11))/ne_i
 
            b_ks(i)%data(1) = w00*b0(k00) + w01*b0(k01) + w10*b0(k10) + w11*b0(k11)
            b_ks(i)%data(2) = w00*b1(k00) + w01*b1(k01) + w10*b1(k10) + w11*b1(k11)
@@ -466,8 +483,9 @@
         ! Kerr-Schild (contravariant) -> Boyer-Lindquist (contravariant)
         u = uks2ubl(u_ks, rr, dble(a))
         b = uks2ubl(b_ks, rr, dble(a))
-        call assign_metric(u, transpose(kerr_metric(rr, tth, dble(a))))
-        call assign_metric(b, transpose(kerr_metric(rr, tth, dble(a))))
+        metric = kerr_metric(rr, tth, dble(a))
+        call assign_metric(u, transpose(metric))
+        call assign_metric(b, transpose(metric))
 
         ! Restore u.u = -1 and b.u = 0 at the interpolated points (see header),
         ! then |b| from the interpolated, projected field

@@ -34,7 +34,13 @@
 ! so that D_1 = 3/2 along the field and 3/4 across it, and every n >= 2
 ! vanishes along the field (CS_Derivations_Sum26.tex, "Doppler line profile"
 ! and "Convergence and validity").  j_n = j_n^(int) D_n phi_n.  theta_B also
-! sets the Doppler line width.
+! sets the Doppler line width.  In the product j_n^(int) D_n the factorials
+! (2n+1)! cancel:
+!       j_n^(int) D_n = (2 pi n_e e^2 nu_c^2 / c) n^(2n+2) theta_e^n / (2^n n!)
+!                       * sin^(2n-2)(theta_B) (1 + cos^2 theta_B),
+! so the sum needs log(n!) only, one log_gamma per point and a recurrence in n
+! (until 2026-10-27, five log_gamma calls per harmonic; the same values to
+! ~1e-14).
 !
 ! Absorption is added from Kirchhoff's law (valid for a thermal, isotropic
 ! Maxwellian distribution -- which is our case):
@@ -74,7 +80,7 @@
         real(kind=8), dimension(:), intent(out) :: j, alpha
         integer :: i, n, nmax, nlo
         real(kind=8) :: nuc, costh, sig0, lnW, jn, dnu, g, TeK, bnu, sin2, lnD
-        real(kind=8) :: kk, nun, sigm
+        real(kind=8) :: kk, nun, sigm, lfn, lnc
         do i = 1, size(nu)
            nuc = e*B(i)/(2d0*pi*m*c)
            if (nuc <= 0d0 .or. n_e(i) <= 0d0 .or. theta_e(i) <= 0d0 .or. &
@@ -107,16 +113,17 @@
            nlo = max(1, int(min(nu(i)/nuc/(1d0 + 40d0*sigm), dble(nmax))))
 
            j(i) = 0d0
+           ! log(n!), carried from n = nlo by lfn = lfn + log(n)
+           lfn = log_factorial(nlo - 1)
+           lnc = log(1d0 + costh*costh)
            do n = nlo, nmax
-              lnW = log(dble(n)+1d0) + (2d0*n+1d0)*log(dble(n)) &
-                    - log_factorial(2*n+1) + dble(n)*log(2d0) &
-                    + log_factorial(n) + dble(n)*log(theta_e(i))
+              lfn = lfn + log(dble(n))
               ! directional factor D_n (see header); along the field only
               ! the fundamental survives
               if (n > 1 .and. sin2 <= 0d0) cycle
-              lnD = log(1d0 + costh*costh) &
-                    - (dble(n)*log(4d0) + log(dble(n)) + log(dble(n)+1d0) &
-                       + 2d0*log_factorial(n-1) - log_factorial(2*n+1))
+              ! log(j_n^(int) D_n) without the prefactor (see header)
+              lnW = (2d0*n+2d0)*log(dble(n)) + dble(n)*(log(theta_e(i)) - log(2d0)) - lfn
+              lnD = lnc
               if (n > 1) lnD = lnD + dble(n-1)*log(sin2)
               jn = 2d0*pi*n_e(i)*e*e*nuc*nuc/c * exp(lnW + lnD)
               kk = dble(n) + 1.5d0
