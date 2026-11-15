@@ -1,25 +1,19 @@
 # grtrans for APERTURE: how one ray is traced
 
-This guide follows one ray of the Cylco-Synchrotron pipeline through grtrans,
-from the camera pixel to the number stored in the image. It is written from
+This guide follows one ray of the APERTURE pipeline through grtrans,
+from the camera pixel to the number stored in the image. The pipeline is the
+outside driver that writes the APERTURE fluid binaries (§5), rewrites
+`inputs.in` before each trace (§2), runs grtrans and reads `grtrans.out`
+(§11); this guide describes only what grtrans sees of it. It is written from
 the code and cites it as
-`file:line` (line numbers checked against the code of 2026-10-25); paths are in
-`grtrans/` unless they start with `pipeline/` or
-`verification_scripts/`. Line numbers drift: search for the routine name when
+`file:line` (line numbers checked against the code of 2026-10-25); paths are
+in this repository. Line numbers drift: search for the routine name when
 one does not match.
 
-The physics behind each step is in `docs/RT_background.tex`; the notebook's
-use of it, and the measurements, are in `docs/RT_notebook_overview.tex` (P4).
-`jnu_calculator/IMPLEMENTATION.md` is the companion guide for the exact
-emissivity code that fills the lookup table. Open problems are in
-`docs/muchado.md`; fixed and closed items are in `docs/history.tex`, cited
-below by stage.
-
-grtrans (Dexter 2016) is the project's git submodule `grtrans/`: branch
+grtrans (Dexter 2016) here is branch
 `aperture` of the fork `Aaron-Barrios/grtrans`, which starts from commit
-`c76cb11` and holds our changes; the project records which commit it uses.
-Build: `make grtrans libgrtrans pgrtrans` in `grtrans/`, then commit there
-and in the project (`README.md`, "How grtrans is used").
+`c76cb11` and holds our changes (§15).
+Build: `make grtrans libgrtrans pgrtrans`.
 
 ## Contents
 
@@ -62,38 +56,35 @@ and in the project (`README.md`, "How grtrans is used").
 
 One geodesic and one fluid lookup serve every frequency of a camera
 (`grtrans_driver.f90:133-202`), so several frequencies in one run cost little
-more than one (muchado §15 item 3). One geodesic also serves several fluid
+more than one. One geodesic also serves several fluid
 binaries traced in one run, one camera each (§5, "Several binaries in one
 run").
 
 ## 2. Inputs: what the pipeline writes
 
-`pipeline/raytrace_q6.py` (`configure_grtrans`, `:377-384`, which refuses a
-camera spin other than the run's and writes the text `render_inputs`,
-`:387-406`, produces) rewrites `grtrans/inputs.in` before every trace;
-`verification_scripts/grtrans_sandbox.py` (`Sandbox`, `:185-332`) writes its
-own copy in a scratch directory (with its own substitutions; it could reuse
-`render_inputs`). Both set:
+The pipeline's driver rewrites `inputs.in` before every trace (and refuses
+a camera spin other than the run's); its test harness writes its own copy in
+a scratch directory. Both set:
 
 | Namelist value | Meaning | Set from |
 |---|---|---|
-| `fmin`, `fmax`, `nfreq` (`&emisdata`) | observing frequencies [Hz]: `fmin=fmax`, `nfreq=1` for one; `nfreq` log-spaced from `fmin` to `fmax` for several in one trace (`raytrace_q6._subs_freq`, `:227-234`) | `pc.FREQ`, or `--freqs` |
-| `nn=npix,npix,nup` | pixels and samples per ray | `pc.CAMERA["npix"]`, `pc.NUP` |
-| `i1=1`, `i2=npix²` | rays traced (both written by both, `raytrace_q6._subs_nn`, `:241-245`; history.tex, Stage 46) | — |
-| `mumin=mumax=cos i`, `nmu=1` | inclination as $\cos i$ | `pc.CAMERA["inc_deg"]` |
-| `spin` | $a$ | `run_config.spin()` |
-| `gridvals=-f,f,-f,f` | field of view, impact parameters [$r_g$] | `pc.CAMERA["fov_rg"]` |
-| `uout` | $1/r_{\rm out}$ of the run's grid: rays start at its outer edge | `run_config.grid().r_out` |
-| `mbh` (`&emisdata`) | black-hole mass [$M_\odot$], sets the length scale `LBH` | `pc.M_BH_MSUN` |
+| `fmin`, `fmax`, `nfreq` (`&emisdata`) | observing frequencies [Hz]: `fmin=fmax`, `nfreq=1` for one; `nfreq` log-spaced from `fmin` to `fmax` for several in one trace | the run's frequency, or a per-trace list |
+| `nn=npix,npix,nup` | pixels and samples per ray | the image size and samples per ray |
+| `i1=1`, `i2=npix²` | rays traced (both always written) | — |
+| `mumin=mumax=cos i`, `nmu=1` | inclination as $\cos i$ | the camera inclination |
+| `spin` | $a$ | the simulation's spin |
+| `gridvals=-f,f,-f,f` | field of view, impact parameters [$r_g$] | the camera's field of view |
+| `uout` | $1/r_{\rm out}$ of the run's grid: rays start at its outer edge | the simulation grid's outer radius |
+| `mbh` (`&emisdata`) | black-hole mass [$M_\odot$], sets the length scale `LBH` | the black-hole mass |
 | `extra=1` | 21 extra slots (§11) | — |
-| `iname` | integrator (`explin`) | sandbox only; `inputs.in` keeps `explin` |
-| `refine_on` (and `refine_*`) | adaptive refinement (§10) | `raytrace_q6.REFINE` (in `pipeline/raytrace_q6.py`, not `pipeline_config.py`) |
-| `fdfile` (`&harm`) | the fluid binary; read by the APERTURE model (`fluid.f90:148`, `fluid_model_aperture.f90:198-213`); at most 100 characters (`fluid.f90:62`), so the sandbox links it under a short name. A name ending in `.lst` is a list of binaries traced in one run (§5, "Several binaries in one run") | — |
+| `iname` | integrator (`explin`) | test harness only; the driver keeps `explin` |
+| `refine_on` (and `refine_*`) | adaptive refinement (§10) | the driver's refinement switch (off by default) |
+| `fdfile` (`&harm`) | the fluid binary; read by the APERTURE model (`fluid.f90:148`, `fluid_model_aperture.f90:198-213`); at most 100 characters (`fluid.f90:62`), so the test harness links it under a short name. A name ending in `.lst` is a list of binaries traced in one run (§5, "Several binaries in one run") | — |
 
 Fixed in `inputs.in` and used: `standard=1` (geokerr camera at "infinity"),
 `nrotype=2` (rectangular grid), `fname='APERTURE'`, `ename='JNUTABLE'`,
 `nvals=1` (Stokes $I$ only), `use_geokerr=T`, `cflag=0` (binary output),
-`nt=1`, `nload=1`, `nmdot=1` (the sandbox sets `nmdot` to the number of
+`nt=1`, `nload=1`, `nmdot=1` (the test harness sets `nmdot` to the number of
 binaries when it traces several in one run, §5).
 
 Inert for APERTURE: `phi0` (the model reads only $r$, $\theta$;
@@ -156,76 +147,68 @@ lies exactly at `uout`, at a turning point or at the horizon.
   $t$ but extra slot 9 (emission-weighted $\phi$), which the pipeline does not
   store. Images and stored extras are bit-identical to the full geodesic; a
   frame costs 7–21% less (most at one frequency). The environment variable
-  `GRT_GEODESIC_FULL` (any value) restores $\phi$ and $t$, e.g. for slow light
-  (muchado L16).
+  `GRT_GEODESIC_FULL` (any value) restores $\phi$ and $t$, e.g. for slow light.
 
 Because the samples are fixed in $u$, a ray at $d=1$ crosses 1350–4200 grid
-cells inside the field of view, and 3200 samples miss 9–36% of them
-(`history.tex`, Stage 35, `ray_spacing_cells.py`). That is why the image
+cells inside the field of view, and 3200 samples miss 9–36% of them. That is why the image
 converges in samples only where the light is not concentrated in single
 cells (§14).
 
 ## 5. The fluid binary
 
-Written by `pipeline/aperture_to_binary.py` from a reconstructed fluid file
-(`fluid.NNNNN.h5`, or `fluid.NNNNN.c{d}.h5` for the $d\times d$
-coarse-grained fluid of `pipeline/coarsen_fluid.py`); read once by
-`read_aperture_data` (`fluid_model_aperture.f90:145-242`).
+Written by the binary's writer, outside grtrans, from the fluid reconstructed
+from one APERTURE dump (at full resolution, or coarse-grained over $d\times d$
+cells, §14); read once by
+`read_aperture_data` (`fluid_model_aperture.f90:145-242`). The layout is also
+given in the header of `fluid_model_aperture.f90`.
 
-- **Header** (60 bytes, `<iiidddddd`, `aperture_to_binary.py:107-126`, `pack_header`):
+- **Header** (60 bytes, `<iiidddddd`):
   magic, $n_r$, $n_\theta$, spin, $\lambda_u$, mass ratio $N$, and the
   emissivity dispatch thresholds `THETA_HYBRID`, `NTHETA_MAX`, `THETA_SYNCH`
   (0 for none). grtrans stops on a magic other than `APL7`/`APL8` and on
   $\lambda_u\le0$ or $N\le0$ (`fluid_model_aperture.f90:156-179`), and on a
   spin that differs from `inputs.in` by more than $10^{-4}$
-  (`initialize_aperture_model`, `:514-520`; history.tex, Stage 46); the
-  pipeline also refuses it before tracing (`raytrace_q6.check_camera_spin`).
+  (`initialize_aperture_model`, `:514-520`); the
+  driver also refuses it before tracing.
 - **Arrays** (float64, $\theta$ slowest, index $k=i_\theta n_r+i_r$): the axes
   $r[n_r]$, $\theta[n_\theta]$, then 14 fields: $n_e$, $\Theta_e$, $|b|$,
-  $u^0..u^3$, $b^0..b^3$, valid, $\beta_p$, $\sigma$
-  (`aperture_to_binary.py:359-368`).
-- **Axes are cell centers** from `config.toml`:
+  $u^0..u^3$, $b^0..b^3$, valid, $\beta_p$, $\sigma$.
+- **Axes are cell centers** of the simulation's grid:
   $r_i=\exp(\ln r_{\rm lo}+(i+\tfrac12)\Delta\ln r)$,
-  $\theta_j=\theta_{\rm lo}+(j+\tfrac12)\Delta\theta$ (`cell_centers`, `:176-193`).
+  $\theta_j=\theta_{\rm lo}+(j+\tfrac12)\Delta\theta$.
 - **Fields:** $n_e=n_e^{\rm rest}$ and $\Theta_e=P_e/n_e^{\rm rest}$ of the
   electrons in their own frame; $u^\mu=u_e^\mu$, $b^\mu=b_e^\mu$ (Kerr–Schild,
   contravariant); $|b|=\sqrt{b_e^2}$ (not used by grtrans, which recomputes
   it, §6, and skipped when grtrans reads the file, as is the validity
   array); $\beta_p=2P/b^2$ and $\sigma=b^2/(2(n_e+n_p))$ of the pair fluid,
-  0 where invalid or non-finite (`:159-174, 321-322`). Electron-free and
-  non-finite cells get $n_e=\Theta_e=0$; a negative $\Theta_e$ is floored to 0
-  (`:310-314`).
-- **Relabeled reading** (`pipeline/relabel.py:70-80`): $\Theta_e\to
+  0 where invalid or non-finite. Electron-free and
+  non-finite cells get $n_e=\Theta_e=0$; a negative $\Theta_e$ is floored to 0.
+- **Relabeled reading** (applied by the writer): $\Theta_e\to
   N\Theta_e/R(\beta_p)$ with $R=(R_{\rm high}\beta_p^2+R_{\rm
   low})/(1+\beta_p^2)$; this, and $N$ in the header (§6), are the only places
   where $R_{\rm high}$ and the relabeling enter grtrans.
 - **The σ cut.** `APL7` with a cut ("cell" mode): cells with
   $\sigma>\sigma_{\rm cut}$ and $n_e>0$ are written with $n_e=\Theta_e=0$,
-  keeping $u$, $b$, $\beta_p$, $\sigma$ (`:324-330`). `APL8` ("point" mode):
-  the cells are written uncut and the cut value is appended after the arrays
-  (`:360-368`); grtrans then tests it at every sample (§6). No cut: `APL7`.
-  Why per sample: §6, "The σ cut: why per sample". One grtrans build reads both: the writer's `--sigma-cut-mode` option (or
-  `pc.TRACE_SIGMA_CUT_MODE`) decides which of the two identifiers, `APL7` or
+  keeping $u$, $b$, $\beta_p$, $\sigma$. `APL8` ("point" mode):
+  the cells are written uncut and the cut value is appended after the arrays;
+  grtrans then tests it at every sample (§6). No cut: `APL7`.
+  Why per sample: §6, "The σ cut: why per sample". One grtrans build reads both: the writer's cut mode decides which of the two identifiers, `APL7` or
   `APL8`, it puts in the binary's first four bytes, and grtrans reads that
   identifier to know whether to test the cut itself.
-- **Geometric masks** (`pipeline_config.POLAR_CUT_DEG`, `R_EMIT_MAX`; writer
-  options `--polar-cut-deg`, `--r-emit-max`): cells within the polar cone or
+- **Geometric masks** (writer options: a polar cone and a maximum emitting
+  radius): cells within the polar cone or
   beyond the radius are written with $n_e=\Theta_e=0$, so they neither emit
   nor absorb (cell-level, in either mode). Defaults since 2026-10-16: no cone
   (with the σ cut at 0.5 no cone of 0.25–4° removed any light) and
   $r_{\max}=80\,r_g$, which leaves out the run's damping layer ($r>79.9$,
-  numerical gas; up to 2.4% of a $d=8$ image, more at $d=2$). Store tag
-  `_pcX`, `_rmX` (`:334-348`). Tests: `docs/RT_notebook_overview.tex`, "The emission cuts
-  of GRMHD imaging"; `history.tex`, Stage 59.
-- **Temperature ceiling** (`pipeline_config.THETA_EMIT_MAX`, writer option
-  `--theta-emit-max`; default none): cells whose $\Theta_e$, as written
+  numerical gas; up to 2.4% of a $d=8$ image, more at $d=2$).
+- **Temperature ceiling** (a writer option; default none): cells whose $\Theta_e$, as written
   (relabeled in the relabeled reading), exceeds it are written with
-  $n_e=\Theta_e=0$, like the geometric masks (RAPTOR's $\Theta_e>100$ cut;
-  `:351-358`; store tag `_tmX`; `history.tex`, Stages 89 and 97).
+  $n_e=\Theta_e=0$, like the geometric masks (RAPTOR's $\Theta_e>100$ cut).
 
 ### Several binaries in one run
 
-Added 2026-10-15 (`planned_run.md`, step 3b). A pixel's geodesic depends only
+Added 2026-10-15. A pixel's geodesic depends only
 on the camera, `nn` and the spin, so one run can trace many binaries along the
 same paths, through grtrans's existing loop over model parameters (one
 parameter per `mdot`, which APERTURE does not use):
@@ -255,8 +238,7 @@ parameter per `mdot`, which APERTURE does not use):
   so it is exactly a single-binary trace of binary $m$. With one binary
   nothing changes (`multibin` is false).
 - **Output.** One block per binary in `grtrans.out`, in list order (§11).
-- **Check** (`verification_scripts/multi_binary_check.py`,
-  `output/multi_binary_check_20261015.txt`): single-binary images are bit for
+- **Check** (2026-10-15): single-binary images are bit for
   bit those of the build before; each block of a 9-binary run (dumps 250, 500,
   1000 × $R_{\rm high}$ 1, 100 at $d=4$; $d=2$; a per-cell binary; the $d=1$
   pair-plasma binary) is bit for bit the separate trace, with extras and with
@@ -265,15 +247,14 @@ parameter per `mdot`, which APERTURE does not use):
   of 291 s (1.7×): each extra binary costs about half of a separate trace
   (24 s against 48 s at $256^2$), not the 40% the profile suggested. On 28
   threads a further binary costs ~0.3 of a trace: every grtrans run gets
-  glibc malloc tunables (`pipeline_config.GRTRANS_MALLOC_TUNABLES`: a 64 MiB
-  trim threshold and top pad, through `pc.grtrans_env()`/`raytrace_q6.run_checked`),
+  glibc malloc tunables from the driver (a 64 MiB trim threshold and top pad:
+  `GLIBC_TUNABLES=glibc.malloc.trim_threshold=67108864:glibc.malloc.top_pad=67108864`),
   so glibc does not shrink and regrow the heap around the temporaries the
   per-binary local frame allocates, which contend between threads (without
   the tunables 0.8–0.9 of a trace on 28 threads and 0.46 on one; with them
-  single traces are ~1.4× faster, output byte-identical; `history.tex`,
-  Stages 62 and 71). A `GLIBC_TUNABLES` already in the environment is kept.
-- **Production.** `run_q6` traces a movie's frames in batches this way
-  (`raytrace_q6.raytrace_batch`; `BATCH` = 4, `--batch`; with the
+  single traces are ~1.4× faster, output byte-identical). A `GLIBC_TUNABLES` already in the environment is kept.
+- **Production.** The driver traces a movie's frames in batches this way
+  (4 frames per run by default; with the
   tunables about 1.6–2.2× faster per frame than one frame per run, images
   identical).
 
@@ -289,7 +270,7 @@ the ray:
    the outermost centers and that edge (at the axis and at the inner and outer
    radii) the position is clamped to the box of centers for the
    interpolation, so the edge cell's values hold, while the metric uses the
-   true position (`:373-377, 391-403`; history.tex, Stage 93).
+   true position (`:373-377, 391-403`).
 3. **Cell and weights:** on each axis the interval from the axis's mean step
    (the axes are uniform in $\ln r$ and $\theta$ up to rounding), moved to the
    one that holds the point: the same interval as bisection, in $O(1)$
@@ -298,7 +279,7 @@ the ray:
    interpolation between the four surrounding cell centers.
 4. **Interpolated:** $n_e$ (`:419`); $\beta_p$ and $\sigma$ over the corners
    that hold fluid ($\sigma>0$), renormalized, as the cut of step 5 tests
-   $\sigma$ (`:420-440`; `history.tex`, Stage 69), kept even where the sample
+   $\sigma$ (`:420-440`), kept even where the sample
    ends up empty, for the extras; if $n_e\le0$ the sample stays empty (`:441`).
 5. **Per-sample cut** (`APL8` only): $\sigma$ is re-averaged over the corners
    with $\sigma>0$ only (cells with no pair particles, invalid cells and
@@ -308,8 +289,8 @@ the ray:
    density-weighted interpolation (`:462-465`).
 7. **Velocity and field:** $u^\mu$ as the electron current over the density,
    $\sum w\,n_eu^\mu/\sum w\,n_e$, so the velocity is the electrons' mean as
-   $\Theta_e$ is their mean temperature (`:467-472`; since 2026-10-27,
-   `docs/muchado.md` L26: $u^\mu$ itself had been interpolated, and at a sample
+   $\Theta_e$ is their mean temperature (`:467-472`; since 2026-10-27:
+   $u^\mu$ itself had been interpolated, and at a sample
    97% of the weight on a nearly empty cell gave a dense hot neighbor's
    electrons its $\Gamma=5.6$); $b^\mu$ component by component (`:474-477`),
    Kerr–Schild. There is no validity gate: empty and cut cells contribute 0 to
@@ -330,8 +311,7 @@ m_ec^2}$ (the $\sqrt N$ of the relabeled reading), and `tcgs` $=\Theta_e$
 
 GRMHD images leave out gas with $\sigma=b^2/\rho>1$ (Heaviside–Lorentz;
 our $\sigma=b^2/(2\rho_0)>0.5$), whose thermodynamics is set by numerical
-floors. How the main codes apply it (source read 2026-10-15; `history.tex`,
-Stage 43):
+floors. How the main codes apply it (source read 2026-10-15):
 
 | Code | Tested | σ at the point | Switched off |
 |---|---|---|---|
@@ -351,7 +331,7 @@ the mask edge that change the long-baseline signal, and testing an
 interpolated σ at each step removes most of them, which is why ipole cuts
 per sample.
 
-The pipeline therefore uses ipole's form (`TRACE_SIGMA_CUT_MODE = "point"`,
+The pipeline therefore uses ipole's form (the writer's `"point"` mode,
 the default since 2026-10-15): the per-cell σ is interpolated to each sample
 (over the corners that hold particles: a particle-free cell is sparse
 sampling, not vacuum) and the sample is left empty above the cut. It is the
@@ -359,8 +339,8 @@ convention of most EHT model images; it needs nothing the binary lacks;
 forming $b^2/\rho$ from interpolated fields instead (grtrans, RAPTOR) lets
 the dense side of an edge dominate and treats our particle-free cells
 almost as vacuum (it would mask the samples beside 11–20% of the emitting
-cells at $d=1$; `sigma_cut_empty.py`). The per-cell cut (`"cell"`, the
-stores traced before 2026-10-15) is ipole's abandoned form. At
+cells at $d=1$). The per-cell cut (`"cell"`, the
+images traced before 2026-10-15) is ipole's abandoned form. At
 $R_{\rm high}\le5$ the choice moves the 230 GHz flux by at most 4% and the
 cut's value (0.25–2.5) by about 10%; at $R_{\rm high}=100$, where the light
 sits at the mask edge, by factors (§14).
@@ -380,8 +360,7 @@ and projects the photon momentum on it:
   $0.81^\circ$, below the table's first $\theta_B$ column ($1.15^\circ$),
   where the table clamps anyway. Stock grtrans uses $\pm0.99$ ($8.1^\circ$)
   here; ours matches the other two angle routines of `kerr.f90`, which moves
-  the relabeled 230 GHz flux by at most 0.04% and no $d$-ratio
-  (`verification_scripts/clamp_check.py`; `history.tex`, Stage 54).
+  the relabeled 230 GHz flux by at most 0.04% and no $d$-ratio.
 
 ## 8. Emission and absorption
 
@@ -392,21 +371,21 @@ three branches, and leaves the rest empty (`:465-485`):
 
 | Branch | Where | What |
 |---|---|---|
-| Cyclotron | $\Theta_e<{\tt THETA\_HYBRID}=5\times10^{-3}$ and $(\nu/\nu_B)\Theta_e\le{\tt NTHETA\_MAX}=0.1$, $n_e>0$, $\Theta_e>0$ | `cyclotron_emis.f90`: a sum of Gaussian lines centered at $n\nu_B[1-(n+\tfrac32)\Theta_e]$ (the relativistic mass shift) of width $n\nu_B\sqrt{\Theta_e\max(\lvert\cos\theta_B\rvert,10^{-4})^2+(n+\tfrac32)\Theta_e^2}$ (Doppler and mass shift; `history.tex`, Stage 81), harmonics up to $\min(\nu/\nu_B+20,\,2/(e^2\Theta_e))$ (`cyclotron_emis.f90:85-128`) |
-| Synchrotron fit | above the table's largest $\Theta_e$ ($4.6\times10^4$; `THETA_SYNCH` unset) | Leung, Gammie & Noble (2011), with the exact $K_2(1/\Theta)$ (`besselk2`, a trapezoid sum of its integral, $\sim10^{-14}$ relative; `history.tex`, Stage 46) and $\max(\lvert\sin\theta_B\rvert,10^{-6})$ (`synch_emissivity`, `besselk2`, `jnu_table.f90:404-455`); a `THETA_SYNCH` below 1 is warned about, since the fit is ultrarelativistic |
-| Table | everything else with $n_e>0$ and $\Theta_e>0$ | interpolation of $\log_{10}F$: tensor-product Catmull-Rom cubic over the $4\times4\times4$ neighboring entries for $\Theta_e\ge$ `th_cubic` $=1$ (linear in an axis's edge interval; the trilinear value where a neighbor is at the $-300$ floor), trilinear below; a linear lookup alone is low by 2.0–2.4% at 230 GHz (`history.tex`, Stage 79). The $x$ axis is piecewise log-uniform (443 entries, 144 per decade between 0.1 and 30, from $10^{-6}$; Stage 80): its interval is found by bisection, and the cubic in $x$ is used only inside a uniform run |
+| Cyclotron | $\Theta_e<{\tt THETA\_HYBRID}=5\times10^{-3}$ and $(\nu/\nu_B)\Theta_e\le{\tt NTHETA\_MAX}=0.1$, $n_e>0$, $\Theta_e>0$ | `cyclotron_emis.f90`: a sum of Gaussian lines centered at $n\nu_B[1-(n+\tfrac32)\Theta_e]$ (the relativistic mass shift) of width $n\nu_B\sqrt{\Theta_e\max(\lvert\cos\theta_B\rvert,10^{-4})^2+(n+\tfrac32)\Theta_e^2}$ (Doppler and mass shift), harmonics up to $\min(\nu/\nu_B+20,\,2/(e^2\Theta_e))$ (`cyclotron_emis.f90:85-128`) |
+| Synchrotron fit | above the table's largest $\Theta_e$ ($4.6\times10^4$; `THETA_SYNCH` unset) | Leung, Gammie & Noble (2011), with the exact $K_2(1/\Theta)$ (`besselk2`, a trapezoid sum of its integral, $\sim10^{-14}$ relative) and $\max(\lvert\sin\theta_B\rvert,10^{-6})$ (`synch_emissivity`, `besselk2`, `jnu_table.f90:404-455`); a `THETA_SYNCH` below 1 is warned about, since the fit is ultrarelativistic |
+| Table | everything else with $n_e>0$ and $\Theta_e>0$ | interpolation of $\log_{10}F$: tensor-product Catmull-Rom cubic over the $4\times4\times4$ neighboring entries for $\Theta_e\ge$ `th_cubic` $=1$ (linear in an axis's edge interval; the trilinear value where a neighbor is at the $-300$ floor), trilinear below; a linear lookup alone is low by 2.0–2.4% at 230 GHz. The $x$ axis is piecewise log-uniform (443 entries, 144 per decade between 0.1 and 30, from $10^{-6}$): its interval is found by bisection, and the cubic in $x$ is used only inside a uniform run |
 | None | $n_e\le0$ or $\Theta_e\le0$ | $j=\alpha=0$ (`:474-485`) |
 
 The thresholds come from the binary header (`set_hybrid_dispatch`,
 `jnu_table.f90:386-402`, called at `fluid_model_aperture.f90:231`), written
-from `pc.THETA_HYBRID`, `pc.NTHETA_MAX`, `pc.THETA_SYNCH`.
+by the binary's writer from the pipeline's settings.
 
-**The table** (`jnu_table.bin`, built by `pipeline/make_jnu_table.py` from
-`jnu_calculator/jnu`): header `JNUT`, $n_x$, $n_{\theta_B}$, $n_\Theta$, the
+**The table** (`jnu_table.bin`, built outside grtrans by an exact thermal
+emissivity code evaluated at every entry): header `JNUT`, $n_x$, $n_{\theta_B}$, $n_\Theta$, the
 three axes, then $\log_{10}F(x,\theta_B,\Theta_e)$ with $x$ slowest, where $F$ is
 $j_\nu$ at $B=1$ G, $n_e=1\,{\rm cm^{-3}}$ and $x=\nu/\nu_B$; the sample gets
 $j_\nu=n_eB\,10^{\log F}$ (`jnu_table.f90:293`). The production table is
-$443\times13\times87$ (`history.tex`, Stage 80): $x\in[10^{-6},10^5]$, 144 per
+$443\times13\times87$: $x\in[10^{-6},10^5]$, 144 per
 decade between 0.1 and 30 and 10 per decade elsewhere; $\theta_B\in[0.02,\pi/2]$
 linear; $\Theta_e\in[7.17\times10^{-5},4.6\times10^4]$, uniform in $\log$.
 The lookup (`jnu_table_emissivity`, `:169-311`) finds the $x$ interval by
@@ -417,16 +396,15 @@ $x<10^{-6}$ uses the first column; a $\Theta_e$ outside the axis gets the
 edge value, with one warning per run and edge (`:190-228`); above $x=10^5$
 the edge value is scaled by the ratio of the synchrotron shape (`:294-299`).
 63670 of the 501033 entries are at the $-300$ floor (no emission below the
-fundamental at low $\Theta_e$); the floor does not affect the images
-(`history.tex`, Stage 88). `JNU_TABLE_PATH` overrides the file (`:124-126`);
-the sandbox clears it.
+fundamental at low $\Theta_e$); the floor does not affect the images.
+`JNU_TABLE_PATH` overrides the file (`:124-126`); the test harness clears it.
 
 **Absorption** is Kirchhoff's, $\alpha_\nu=j_\nu/B_\nu(T_e)$ with
 $kT_e=\Theta_em_ec^2$: full Planck in the table and fit branches
 (`jnu_table.f90:301-309, 361-371, 430-431`), Rayleigh–Jeans in the cyclotron
 branch (`cyclotron_emis.f90:130-137`). A sample with $n_e>0$ and
 $\Theta_e=0$ (the writer's floor) goes to no branch and gets $j=\alpha=0$
-(`jnu_table.f90:474-485`; `history.tex`, Stage 46). A NaN $n_e$ or $\Theta_e$
+(`jnu_table.f90:474-485`). A NaN $n_e$ or $\Theta_e$
 still reaches the table, so the NaN stays visible (§12).
 
 Only Stokes $I$ is carried (`nvals=1`, `e%neq=1`; `emis.f90:366-370`); with
@@ -459,7 +437,7 @@ Only Stokes $I$ is carried (`nvals=1`, `e%neq=1`; `emis.f90:366-370`); with
   every frame tested (1.6, 16, 160 MHz and 230 GHz; 64² and 128²) is within
   0.65% of the 4×-sample reference, the remaining error being the
   sampling error of §4; it costs nothing measurable (the integration is
-  <1% of a trace). (`history.tex`, Stage 99.)
+  <1% of a trace).
 - **The others:** `lsoda` (ODE solver with `MAX_TAU = 10`, tolerances 1e-6 /
   1e-12 on the `fac`-normalized intensity, its step capped at the ray's
   smallest sample spacing, `:27, 218-339`; a failed ray is zeroed,
@@ -471,14 +449,13 @@ Only Stokes $I$ is carried (`nvals=1`, `e%neq=1`; `emis.f90:366-370`); with
   $\alpha$ linear between samples, the same model as `explin`'s sub-steps,
   and agrees with the 4×-sample reference to ≤0.3% on the 128² frames tested
   (≤1.4% at 64²), but a frame takes 1.46–1.50× as long (integration timed
-  separately with a scratch timing build, `verification_scripts/output/integrator_timing.txt`;
-  `history.tex`, Stage 99) and it once gave a silent +33% at 64² (one pixel above the
-  thermal bound; `integrator_check.py` flags such pixels), so it is the
+  separately with a scratch timing build) and it once gave a silent +33% at
+  64² (one pixel above the thermal bound), so it is the
   check, not the production integrator.
 
 ## 10. Adaptive refinement
 
-Off by default (`raytrace_q6.REFINE = False`); on only with `explin` and one Stokes
+Off by default (`refine_on=F` in `inputs.in.default`); on only with `explin` and one Stokes
 component (`grtrans_driver.f90:277-279`). `&refine` sets `refine_rtol`
 (1e-2), `refine_atol_frac` (1e-3), `refine_tau_cut` (20),
 `refine_max_depth` (6), `refine_max_points` (2000, points added per ray
@@ -489,7 +466,7 @@ and frequency) (`read_inputs.f90:33-35,
   change of `harmonic_index` where the harmonics are separate
   ($n\le2/(e^2\Theta_e)$); a jump in $j$ or $\alpha$ by more than 10×.
   `harmonic_index` (`:777-802`) reads `tcgs` as $\Theta_e$ for APERTURE and
-  as kelvin otherwise. (History: `history.tex`, "refinement", 2026-10-15.)
+  as kelvin otherwise.
 - **Each level** halves the active intervals, places new points on a cubic in
   $\lambda$ through four neighbors (`:829-845`), evaluates the full fluid →
   frame → emissivity chain there, and keeps splitting where the two halves
@@ -512,8 +489,8 @@ and frequency) (`read_inputs.f90:33-35,
   not search for structure no sample touched. At $d=1$ a ray crosses
   1350–4200 cells, and 3200 uniform samples miss 9–36% of them (§4), which
   is why refined traces from 200 samples reached only 0.23–0.73 of the
-  converged flux there (`history.tex`, Stages 29, 31) and why production uses
-  uniform sampling dense enough to touch the cells (`history.tex`, Stage 48).
+  converged flux there and why production uses
+  uniform sampling dense enough to touch the cells.
   The point budget is the ray's own samples plus `refine_max_points`
   (`grtrans_driver.f90:628`).
 - The image uses the refined points; the extras stay on the original ones
@@ -532,14 +509,13 @@ index `(l-1)·nfreq·nparams + (m-1)·nfreq + k` (time $l$ slowest, then model
 parameter $m$, frequency $k$ fastest; `grtrans_driver.f90:444-461`); a run
 over several binaries at one frequency writes block $m$ for the $m$-th binary
 of the list, and with `nfreq` > 1 each binary's frequencies follow one another.
-The pipeline's one decoder is
-`raytrace_q6.read_grtrans_image` (`pipeline/raytrace_q6.py:587-684`), which
+The pipeline's one decoder
 takes the trace's `nvals` (or infers it from the row count: 1, 4, 22 or 25
 rows) and returns $I$ from row 0 and the extras from the rows after the
 `nvals` Stokes rows, so a 4-Stokes trace is decoded correctly; a row count
 that fits neither is an error. It returns the first block unless asked for
-another (`block=i`, 0-based) or for all (`block="all"`, a list);
-`grtrans_sandbox.Sandbox.read_all` reads one per binary.
+another (0-based) or for all (a list); the test harness reads one per
+binary.
 
 With `extra=1` each pixel carries 21 more values (`pgrtrans.f90:111-119`;
 7 if `nup=1`, which the reader does not expect). Each is a line-of-sight
@@ -550,7 +526,7 @@ $\tau$; 7–14 are $\langle r\rangle$, $\langle\theta\rangle$,
 $\langle\phi\rangle$, $\langle n_e\rangle$, $\langle\Theta_e\rangle$,
 $\langle B\rangle$, $\langle2p/b^2\rangle$, $\langle{\rm sign}\cos\theta\rangle$;
 20 and 21 are the pipeline's $\langle\beta_p\rangle$ and $\langle\sigma\rangle$
-(`:330-391`). `read_grtrans_image` returns slots 1, 2, 7, 8, 10, 11, 12, 20
+(`:330-391`). The decoder returns slots 1, 2, 7, 8, 10, 11, 12, 20
 and 21; the stores keep 10, 11, 12, 20, 21 (`ex_n_e`, `ex_theta_e`, `ex_b`,
 `ex_beta`, `ex_sigma`) and slot 2 as `nan_samples` (§12). All of 7–14, 20, 21
 are accumulated in one pass over the ray (each is
@@ -559,23 +535,22 @@ the weight integrates to 0 gets 0 in all of them. Slot 2 is 0 with one Stokes co
 a ray skipped for a NaN emissivity, where it holds the number of NaN
 samples (§12). The extras need no new emissivity evaluations and no
 measurable time (a $128^2$ frame at 3200 samples: 10.5 s with and without
-them; byte-identical outputs; `history.tex`, Stage 62).
+them; byte-identical outputs).
 
 ## 12. Failures
 
 | Case | Result |
 |---|---|
-| NaN in $j$ | `fac` is NaN, the ray is skipped: pixel and extras 0, but extra slot 2 = the ray's number of NaN samples; a "NaN in emissivity" line per ray and, after the ray loop, "WARNING: N ray(s) had a NaN emissivity" on stdout (`grtrans_driver.f90:203-208, 241, 430-437`; `pgrtrans.f90:240-242`). The pipeline stores slot 2 per frame (`nan_samples`; `raytrace_q6.q6_nan_samples`, `:1128-1138`) and its sanity check counts those pixels as bad (`run_q6`, `:1448-1468`; `history.tex`, Stage 92) |
-| NaN only in $\alpha$ | `explin` returns NaN, "NaN in integrate!" (`radtrans_integrate.f90:210-211`); the pipeline's sanity check masks non-finite pixels (`run_q6`, `raytrace_q6.py:1459-1468`) |
+| NaN in $j$ | `fac` is NaN, the ray is skipped: pixel and extras 0, but extra slot 2 = the ray's number of NaN samples; a "NaN in emissivity" line per ray and, after the ray loop, "WARNING: N ray(s) had a NaN emissivity" on stdout (`grtrans_driver.f90:203-208, 241, 430-437`; `pgrtrans.f90:240-242`). The pipeline stores slot 2 per frame (`nan_samples`) and its sanity check counts those pixels as bad |
+| NaN only in $\alpha$ | `explin` returns NaN, "NaN in integrate!" (`radtrans_integrate.f90:210-211`); the pipeline's sanity check masks non-finite pixels |
 | No samples / geodesic failure | pixel 0 (`grtrans_driver.f90:575-584`) |
 | `lsoda` failure | ray zeroed (`odepack.f90:91-95`) |
-| Negative or too-hot pixels | not clipped in Fortran; masked by the pipeline (same lines) |
+| Negative or too-hot pixels | not clipped in Fortran; masked by the pipeline's sanity check |
 
 ## 13. Threads
 
 The ray loop is `!$omp parallel do schedule(guided)` (`pgrtrans.f90:224-235`;
-stock grtrans's `static,1` is about 5% slower, since rays differ in cost;
-`history.tex`, Stage 62).
+stock grtrans's `static,1` is about 5% slower, since rays differ in cost).
 Each thread owns the module state `f, r, g, e, EXTRA_QUANTS, LBH, MBH`
 (`threadprivate`, `grtrans_driver.f90:46`), the index of the fluid binary it
 traces (`aperture_active`, `fluid_model_aperture.f90:108-109`; the binaries
@@ -590,8 +565,7 @@ makes four work arrays of $352$ bytes per sample in all (1.1 MB at 3200
 samples, 9 MB at 25600; `emis.f90:473`). This gfortran build puts them on the
 heap, not the thread stack: traces at 25600, 65536 and 131072 samples (up to
 46 MB per call, refinement included) ran on 28 threads although the thread
-stack is 8 MB and the pipeline sets no `OMP_STACKSIZE` (`history.tex`,
-Stage 70). A compiler or flags that
+stack is 8 MB and the pipeline sets no `OMP_STACKSIZE`. A compiler or flags that
 put such arrays on the stack (`-fstack-arrays`, `-Ofast`) would need that
 check again, or `OMP_STACKSIZE` raised (e.g. `64M`).
 
@@ -602,20 +576,18 @@ binary of §5: $d$ is the coarse-graining of the fluid before it is written,
 $R_{\rm high}$ only the electron temperature $\Theta_e=N\Theta_e^{\rm
 sim}/R(\beta_p)$ in it. Everything below is measured on the relabeled
 230 GHz images ($128^2$, `explin`, uniform sampling, $\sigma_{\rm cut}=0.5$)
-of dumps 250, 500 and 1000 (`history.tex`, Stage 40;
-`verification_scripts/rhigh_sweep.py`, `rhigh_trace.py`; outputs
-`rhigh_sweep.txt`, `rhigh_trace_{cell,point}.txt`).
+of dumps 250, 500 and 1000.
 
 ### What d changes
 
 - **The grid.** At $d$ the binary has $(2048/d)^2$ cells, each the average of
   $d\times d$ output cells ($2d\times2d$ simulation cells) with
-  $\sqrt{-g}$ weights (`coarsen_fluid.py`, rule "datalib"); the cell centers
+  $\sqrt{-g}$ weights; the cell centers
   move accordingly, and the no-emission box of §6 grows by $d$.
 - **The temperature.** Averaging the moments over a tile turns velocity
   differences between its cells into pressure, so a coarser tile is hotter:
   at dump 500 the share of cells with $\Theta_e>0.05$ inside $r=30$ is 15, 36
-  and 61% at $d=1$, 2, 4 (`coarse_theta_shares.py`). The heated electrons'
+  and 61% at $d=1$, 2, 4. The heated electrons'
   median $\Theta_e$ moves only a little (table below); the hot tail grows.
 - **Sampling.** A ray crosses about $d$ times fewer cells, so the same
   samples resolve them better, and isolated hot cells merge with their
@@ -626,7 +598,7 @@ of dumps 250, 500 and 1000 (`history.tex`, Stage 40;
 
 - **The temperature.** The torus body has $\beta_p\sim10$–80, so there
   $R\approx R_{\rm high}$; only the funnel walls ($\beta_p\lesssim1$) fall to
-  $R_{\rm low}=1$ (`output/rhigh_sweep_rtheta.png`). The heated electrons
+  $R_{\rm low}=1$. The heated electrons
   ($\Theta_e^{\rm sim}>10^{-4}$, number-weighted median) sit at
   $\Theta_e\approx0.2$ at $R_{\rm high}=100$, 1 at 20, 3–6 at 5 and 16–26 at 1;
   none exceeds the table's top, so the synchrotron-fit branch is not used.
@@ -641,11 +613,10 @@ of dumps 250, 500 and 1000 (`history.tex`, Stage 40;
   flux by 0.96–1.02 at $R_{\rm high}=1$ and 0.38–1.78 at 100 ($d=4$), and
   testing it per sample instead of per cell by 0.99–1.00 against 0.33–0.95.
 - **The run is not a MAD** ($\phi_{\rm BH}\approx5.8$ Heaviside–Lorentz, about
-  21 Gaussian, median over the run; `pipeline/horizon_flux.py`, notebook P3d;
-  `history.tex`, Stage 101), so the MAD-based
+  21 Gaussian, median over the run), so the MAD-based
   preference for $R_{\rm high}=1$–5 (Mizuno et al. 2021) does not carry over
   directly. $R_{\rm high}$ stays a free parameter of each trace (decided
-  2026-10-15, `history.tex`, Stage 48; `pc.R_HIGH` = 100 is only the default).
+  2026-10-15; the pipeline's default of 100 is only a default).
 
 ### Both together
 
@@ -695,9 +666,7 @@ What the table says:
   $d=2$ or 4 removes most of that.
 
 Samples needed (measured 2026-10-16 over $64^2$–$512^2$, three dumps, the
-per-sample cut; `verification_scripts/nup_npix_convergence.py`,
-`RT_notebook_overview.tex`, "Convergence in `nn(3)` against image size,
-$R_{\rm high}$ and $d$"): image size does not matter. The table gives the
+per-sample cut): image size does not matter. The table gives the
 fewest samples per ray that keep both the median flux within 1% of the
 12800-sample value and the median pixel error below 1%, at that count and at
 every larger one (median over dumps 250, 500, 1000; pixel error over the
@@ -713,59 +682,104 @@ pixels holding 99% of the reference flux; valid for all four image sizes;
 (12800 samples are within 1–2% of 25600 at $d=1$.) These replace the rougher
 settings above (judged at $128^2$, per-cell cut). Blurred to the EHT's
 20 µas beam, most images look the same much earlier (cross-correlation within
-$10^{-3}$ from 200 samples at $d=4$, 200–1600 at $d=2$, 200–6400 at $d=1$;
-`verification_scripts/image_similarity.py`; `RT_notebook_overview.tex`, "Is an
-undersampled image qualitatively the same?").
+$10^{-3}$ from 200 samples at $d=4$, 200–1600 at $d=2$, 200–6400 at $d=1$).
 
 ## 15. Our changes to stock grtrans
 
-`git -C grtrans diff c76cb11 aperture` shows all of them (the changed
-upstream files and the added ones below).
+`git diff c76cb11 aperture` in this repository shows all of them. Grouped by what
+they do; the files are given as citations.
 
-- **Added:** `fluid_model_aperture.f90` (the binary and its interpolation,
-  §5–6), `jnu_table.f90` (table, dispatch, synchrotron fit, §8),
-  `cyclotron_emis.f90` (§8), `jnu_table.bin`, `test_aperture_model.f90` (at
-  cell centers: the stored $n_e$, $\Theta_e$, $u$, $b$ come back, and
-  `uks2ubl` preserves $u\cdot u$, $b\cdot b$, $b\cdot u$ between the
-  Kerr–Schild and Boyer–Lindquist metrics; build line in its header),
-  `inputs.in.default` (the namelists at the pipeline defaults, refinement
-  off; `inputs.in` itself is git-ignored, since every trace rewrites it, and
-  `raytrace_q6` copies it from the default when it is missing), `files.in`,
-  `plot_grtrans_jnu.ipynb`, and this guide.
-- **`fluid.f90`:** the `APERTURE` model, its dispatch and
-  `convert_fluidvars_aperture` (§6); `rho2`/`Be` carry $\beta_p$ and $\sigma$.
-- **Several binaries in one run** (§5): `fluid_model_aperture.f90` (per-binary
-  storage, `.lst` lists, `select_aperture_binary`), `grtrans_driver.f90`
-  (binary $m$ per model parameter), `pgrtrans.f90` (the `nmdot` check).
-- **`emis.f90`:** the `JNUTABLE` emissivity type; `calc_opt_depth` as a
-  running trapezoid.
-- **`grtrans_driver.f90`:** refinement (`refine_ray`, `refine_eval_points`,
-  `harmonic_index`, statistics; its point budget counts added points); the `explin` hook; slot 1 = total $\tau$,
-  slots 20/21; guards in the extras; the NaN-ray count and slot-2 flag; the
-  `nvals=4` stop.
-- **`radtrans_integrate.f90`, `rad_trans.f90`:** the `explin` integrator
-  (`iflag=4`) with sub-steps across thick intervals; `lsoda`'s `oatol` 1e-8
-  → 1e-12 and its step capped at the sample spacing; `nextra` 21.
-- **`geokerr_wrapper.f`:** the λ-only mode of `GEOPHITIME` and `ELLPHITMU`
-  (§4), `geokerr_lambda_only_from_env`, `geokerr_set_lambda_only`.
-- **`read_inputs.f90`:** the `&refine` namelist. **`pgrtrans.f90`:**
-  `nextra` 19 → 21 (7 still if `nup=1`); refinement statistics and the
-  NaN-ray summary (moved from `grtrans.f90` on 2026-10-15); the λ-only switch
-  before any geodesic of a call (the flag is a COMMON and outlives a call in
-  one Python session, so it is set again before slow light's $t_0$ pass). **`grtrans_program.f90`:** longer file names.
-- **`phys_constants.f90`:** CODATA 2018 constants, $M_\odot=1.98841\times10^{33}$ g.
-- **`fits.f90`:** no-op stubs (no cfitsio); **`Makefile`:** the new objects,
-  no `-lcfitsio`.
-- **The other `fluid_model_*.f90`:** namelists moved after the declarations
-  (gfortran).
+- **A fluid model for Aperture GR-PIC output** (§5–6). grtrans reads the
+  reconstructed fluid from a stream binary and interpolates it to the ray samples:
+  $n_e$, $\Theta_e$, the electrons' mean velocity, $b^\mu$, and $\beta_p$, $\sigma$
+  for the extras (`fluid_model_aperture.f90`; the `APERTURE` model, its dispatch
+  and `convert_fluidvars_aperture` in `fluid.f90`, where `rho2`/`Be` carry $\beta_p$
+  and $\sigma$). A test checks it at cell centers: the stored $n_e$, $\Theta_e$,
+  $u$, $b$ come back, and `uks2ubl` preserves $u\cdot u$, $b\cdot b$, $b\cdot u$
+  between the Kerr–Schild and Boyer–Lindquist metrics (`test_aperture_model.f90`,
+  build line in its header).
+- **Several binaries along the same rays** (§5). A `.lst` of binaries is traced in
+  one run, binary $m$ into the cameras of model parameter $m$, one geodesic per
+  pixel for all of them (`fluid_model_aperture.f90`: per-binary storage,
+  `select_aperture_binary`; `grtrans_driver.f90`; the `nmdot` check in
+  `pgrtrans.f90`).
+- **The exact thermal emissivity, tabulated** (§8). A new emissivity type,
+  `JNUTABLE`, looks $j_\nu$ up in a precomputed table of the exact
+  Maxwell–Jüttner emissivity, with absorption from Kirchhoff's law, and
+  dispatches to an analytic cyclotron line in cold gas and to the
+  thermal-synchrotron fit in very hot gas (`jnu_table.f90`, `jnu_table.bin`,
+  `cyclotron_emis.f90`; the type in `emis.f90`).
+- **A transfer integrator that survives thick gas.** The `explin` integrator
+  (`iflag=4`) takes the source function linear in $\tau$ and sub-steps across
+  thick intervals; `lsoda`, kept as the check, has its absolute tolerance
+  lowered from $10^{-8}$ to $10^{-12}$ and its step capped at the sample spacing
+  (`radtrans_integrate.f90`, `rad_trans.f90`; the `explin` hook in
+  `grtrans_driver.f90`). The optical depth is a running trapezoid
+  (`calc_opt_depth`, `emis.f90`).
+- **Adaptive ray refinement**, off by default: under-resolved intervals of a ray
+  are resampled, within a point budget that counts the added points
+  (`refine_ray`, `refine_eval_points`, `harmonic_index` and their statistics in
+  `grtrans_driver.f90`; the `&refine` namelist in
+  `read_inputs.f90`; the statistics for both the program and the f2py path in
+  `pgrtrans.f90`).
+- **Faster geodesics** (§4). For the axisymmetric APERTURE fluid with fast light,
+  geokerr computes only the affine parameter and skips the third-kind elliptic
+  integrals that only $t$ and $\phi$ need; images and stored extras are
+  bit-identical (`geokerr_wrapper.f`: the λ-only mode of `GEOPHITIME` and
+  `ELLPHITMU`, `geokerr_lambda_only_from_env`, `geokerr_set_lambda_only`; the
+  switch in `pgrtrans.f90`, set before any geodesic of a call, since the flag is a
+  COMMON that outlives a call in one Python session, and so set again before slow
+  light's $t_0$ pass).
+- **A geokerr fix for vortical rays seen from below the equator.** For $\mu_0<0$
+  in the asymmetric-roots case ($Q<0$, orbits that stay in one hemisphere),
+  `GEOMU` counted the polar turning point as `tpm` $=-1$ (its integrals carried
+  the sign of $\mu_0$), and `GEOPHITIME` read that as the $\mu_0>0$ count, so
+  $\lambda$ jumped by twice the half-oscillation integral after the turning point.
+  Both now solve the mirror image ($\mu\to-\mu$, `sm` → −`sm`; the $\mu$ equation
+  and the $t$, $\phi$ integrands are even in $\mu$), and $\mu_0\ge0$ runs the same
+  arithmetic as before. Found as one ray of a $\mu_0<0$ image with $\tau<0$;
+  checked against the Mino-time value $\Sigma\,|\Delta r|/\sqrt{R}$ of every step
+  (`geokerr_wrapper.f`).
+- **Slow light for the APERTURE fluid.** A `.lst` whose lines are `path t` (with a
+  `tframe <t>` line and an optional `tref <L>` line) loads time slices of one
+  fluid (same grid, $\lambda_u$, mass ratio, σ cut), and each sample is evaluated at
+  $t_{\rm emit}=t_{\rm frame}+t_{\rm ref}-L$, linearly between the two slices around
+  it ($L$ the Kerr–Schild look-back from the ray's first sample; `tref`, one
+  value for all rays, defaults to $1/u_{\rm out}$). Needs `nload` > 1 (the
+  geodesics' $t$). With every slice the same binary the image equals the
+  fast-light one, a check that needs nothing but grtrans
+  (`fluid_model_aperture.f90`: `aperture_vals_slow`, `ks_time`,
+  `aperture_slow_report`, and the list format with an example in its header;
+  `aperture_set_rout` called from `pgrtrans.f90`).
+- **A fix to grtrans's own slow-light setup.** The $t_0$ pass of `nload` > 1 zeroes
+  geokerr's `kext`, `next` and `mufill` for its one-point geodesics
+  (`initialize_geo_tabs`), and they were never restored, so every slow-light
+  trace, of any fluid model, lost geokerr's extra samples near a radial turning
+  point. They are now restored after the pass (`pgrtrans.f90`).
+- **More outputs and safer ones.** Slot 1 holds the total $\tau$; slots 20 and 21
+  the emission-weighted $\beta_p$ and $\sigma$, so `nextra` is 21 (7 still if
+  `nup=1`); guards in the extras against 0/0; rays with a NaN emissivity are
+  counted, reported and flagged in slot 2; `nvals=4` with a Stokes-I-only
+  emissivity stops (`grtrans_driver.f90`, `rad_trans.f90`, `pgrtrans.f90`, where
+  the NaN-ray summary moved from `grtrans.f90` on 2026-10-15).
+- **Constants and build.** CODATA 2018 constants, $M_\odot=1.98841\times10^{33}$ g
+  (`phys_constants.f90`); no-op FITS stubs instead of cfitsio (`fits.f90`, and the
+  `Makefile` without `-lcfitsio`, with the new objects); longer file names
+  (`grtrans_program.f90`); the other fluid models' namelists moved after their
+  declarations, for gfortran (`fluid_model_*.f90`).
+- **Files added for running and reading it.** `inputs.in.default` (the namelists
+  at the pipeline defaults, refinement off; `inputs.in` itself is git-ignored,
+  since every trace rewrites it, and the driver copies it from the default when
+  it is missing), `files.in`, `plot_grtrans_jnu.ipynb`, and this guide.
 
 ## 16. Known problems
 
-No grtrans item is open in `docs/muchado.md`. The ones this guide has
-covered are closed in `history.tex`: the cyclotron line width near
-$90^\circ$ (L1-R4, Stage 81; §8), the table's floor (L8-F7, no effect;
-Stage 88), the no-emission box (L8-F9, Stage 93), the NaN flag of extra
-slot 2 (L8-G4, Fortran side Stage 46, pipeline side Stage 92), the extra
-slots averaging empty corners as zero (L1-R18, Stage 69), stack use (L8-G7,
-Stage 70), and M4-F1, L8-F2, F4, F5, F10, F11, F12, G6, G8, C8, L1-R7 and
-L1-R17 (Stage 46).
+No grtrans problem is known to be open. The ones this guide has covered are
+fixed or closed: the cyclotron line width near $90^\circ$ (§8), the table's
+floor (no effect; §8), the no-emission box (§6), the NaN flag of extra
+slot 2 (§11, §12), the extra slots averaging empty corners as zero (§6),
+stack use (§13), and the fixes of 2026-10-15 (refinement's harmonic test
+reading $\Theta_e$ for APERTURE, §10; no emissivity branch for $n_e\le0$ or
+$\Theta_e\le0$ and the exact $K_2$ of the synchrotron fit, §8; the guarded
+extra slots, §11; the `nvals=4` stop and thread-safe warning flags, §8, §13;
+the spin check, §5; `refine.out` from `pgrtrans`, §10).

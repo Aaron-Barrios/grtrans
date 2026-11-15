@@ -1,7 +1,7 @@
 ! test_aperture_model.f90
 !
-! Test of the Aperture fluid model (fluid_model_aperture.f90) on a binary
-! written by aperture_to_binary.py.  At exact cell centers the bilinear
+! Test of the Aperture fluid model (fluid_model_aperture.f90) on a binary in
+! its APL7/APL8 layout (header of fluid_model_aperture.f90).  At exact cell centers the bilinear
 ! weights are 0/1, so aperture_vals must return the stored values.  Checks
 ! (each a FAIL if violated; tolerances are for the single-precision outputs):
 !   1. n_e and theta_e at the cell equal the stored n_e, theta_e (relative
@@ -21,8 +21,7 @@
 ! grained files, whose block means are not unit vectors) and the ranges.
 !
 ! Usage: ./test_aperture_model [fluid_binary [camera_spin]]
-!   default binary: Cylco-Synchrotron/aperture_fluid.bin (the shared scratch
-!   file of the last trace).  Without camera_spin the binary's own spin is
+!   default binary: aperture_fluid.bin in the current directory.  Without camera_spin the binary's own spin is
 !   used; with it, initialize_aperture_model is called with that spin, so a
 !   mismatch stops the program (exit 1) as it stops grtrans.
 !
@@ -51,7 +50,7 @@ program test_aperture_model
   double precision :: nerr, terr, uerr, berr, inv_err, sc, uu, ub, d
   character(len=512) :: path, arg
 
-  path = '/home/aaron/Research/Cylco-Synchrotron/aperture_fluid.bin'
+  path = 'aperture_fluid.bin'
   if (command_argument_count() >= 1) call get_command_argument(1, path)
   if (command_argument_count() >= 2) then
      call get_command_argument(2, arg)

@@ -53,7 +53,7 @@
 ! Rays whose emissivity had a NaN somewhere (shared, incremented atomically by
 ! grtrans_driver; reset and reported by grtrans_main, pgrtrans.f90).  Such a
 ! ray's fac is NaN, so its pixel and extras are stored as 0, except extra
-! slot 2 (docs/muchado.md, L8-G4).
+! slot 2, which holds the ray's number of NaN samples.
        integer :: nan_rays = 0
 
 !       interface grtrans_driver_jac_form
@@ -327,8 +327,7 @@
 !                           write(6,*) 'rtau', size(r%tau),size(r%tau(7:7))
 !                           write(6,*) 'tsum: ',tsum(g%lambda(1:taudex),dummy(1:taudex))
 !                           write(6,*) 'tsum: ',tsum(g%lambda(1:taudex),dummy(1:taudex)*g%x(1:taudex)%data(2))
-! Slots 7-14 and 20-21 in ONE pass over the ray (2026-10-17, docs/history.tex,
-! Stage 62).  Each slot is <q> = int(w q dlambda) / int(w dlambda) with the
+! Slots 7-14 and 20-21 in ONE pass over the ray (2026-10-17).  Each slot is <q> = int(w q dlambda) / int(w dlambda) with the
 ! weight w = j exp(-tau); the trapezoid rule makes either integral
 ! sum_i c_i y_i with c_i half the sum of the two neighboring steps of lambda,
 ! so one loop accumulates all the numerators and the denominator.  Until then
@@ -338,9 +337,9 @@
 ! summation order differs), and the per-point expressions are those of the
 ! old code, single-precision fluid fields included.  A ray whose weight
 ! integrates to 0 (e.g. exp(-tau) underflowing wherever j > 0) still gets 0 in
-! all of them rather than 0/0 (docs/muchado.md, L8-G8).
-! Slots 20-21 (APERTURE): the PIPELINE's beta_p (f%rho2) and sigma (f%Be),
-! carried in the binary (relabel.beta_p; b^2/(2 rho_0) of the pair fluid);
+! all of them rather than 0/0.
+! Slots 20-21 (APERTURE): the binary's beta_p (f%rho2) and sigma (f%Be), as
+! its writer computed them (2P/b^2 and b^2/(2 rho_0) of the simulated fluid);
 ! grtrans's own 4 n_e theta_e/b^2 and b_e^2/(4 n_e_rest) are not those once
 ! the temperature is relabeled.  For other models the stock beta and
 ! sigma, masked as before (b^2 > 0, rho > 0, floored at 0) because bilinear
@@ -433,7 +432,7 @@
                         ! a ray skipped because of a NaN in j (fac is NaN) is
                         ! flagged in slot 2 with its number of NaN samples, so it
                         ! can be told from a ray without emission (slot 2 is
-                        ! otherwise 0 with one Stokes component; L8-G4)
+                        ! otherwise 0 with one Stokes component)
                         if(nnan > 0 .and. e%neq==1) r%tau(2)=dble(nnan)
                      endif
 !                     write(6,*) 'zero: ',status, size(r%I,1), size(r%I,2), r%I(:,r%npts)
@@ -780,7 +779,7 @@
 ! tcgs is the temperature in kelvin, or already Theta_e when tdimless (the
 ! APERTURE model, convert_fluidvars_aperture).  Before 2026-10-15 it was
 ! always read as kelvin, so for APERTURE n* ~ 1.6e9/Theta_e and every change
-! of floor(nu/nu_c) triggered a split (docs/muchado.md, M4-F1).
+! of floor(nu/nu_c) triggered a split.
          real(kind=8), dimension(:), intent(in) :: nu,bcgs,tcgs
          logical, intent(in) :: tdimless
          real(kind=8), dimension(size(nu)) :: h

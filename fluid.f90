@@ -327,7 +327,7 @@
                  allocate(f%kela(nup))
               elseif(fname=='APERTURE') then
                  f%model=APERTURE
-                 ! rho2 carries the pipeline's beta_p and Be its sigma
+                 ! rho2 carries the binary's beta_p and Be its sigma
                  ! (fluid_model_aperture; Be is otherwise KORAL's)
                  allocate(f%rho2(nup)); allocate(f%Be(nup))
               elseif(fname=='THICKDISK') then
@@ -1000,9 +1000,9 @@
         ! Aperture code->CGS.  The PIC run fixes only dimensionless ratios
         ! (sigma, beta_p, Theta_e), so there is exactly ONE free physical scale:
         ! lambda_u, the number of cm^-3 per code density unit, fixed once per
-        ! run (not per snapshot) by physical_scale.py: the densest valid cell of
-        ! the run's first dump, in the electrons' rest frame (max n_e_rest), is
-        ! given NE0 (1e6 cm^-3).  It arrives in the binary's header
+        ! run (not per snapshot) by the binary's writer (for the runs traced so
+        ! far: the densest valid cell of the run's first dump, in the electrons'
+        ! rest frame, is given 1e6 cm^-3).  It arrives in the binary's header
         ! (aperture_lambda_u, fluid_model_aperture.f90), so nothing here is
         ! specific to one run.  r_g, G and M_sun do not enter it.  The field is NOT scaled independently: Aperture
         ! uses Heaviside-Lorentz code units (dD/dt = curl H - J, no 4 pi) with
@@ -1020,8 +1020,8 @@
         !   f%p   carries theta_e (dimensionless); passed through in tempcgs
         !         so the emission model reads it directly (NOT Kelvin).
         ! sp%sigcut (&fluiddata sigcut) is inert here: andrew_sigcut is not
-        ! called for APERTURE.  The only sigma cut is the pipeline's
-        ! TRACE_SIGMA_CUT, applied by the writer per cell (APL7) or by
+        ! called for APERTURE.  The only sigma cut is the binary's, applied
+        ! by its writer per cell (APL7) or by
         ! aperture_vals per sample with the value in the binary (APL8).
         type (fluid), intent(in) :: f
         type (source_params), intent(in) :: sp

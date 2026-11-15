@@ -2,9 +2,8 @@
 !
 ! Non-relativistic (cyclotron) thermal emissivity, valid for theta_e << 1.
 ! This is the exact low-temperature limit of the Maxwell-Juettner synchrotron
-! emissivity, from the low-temperature expansion of the Schott formula
-! (docs/CS_Derivations_Sum26.tex, "Non-relativistic (cyclotron) limit"; ported from the
-! jnu_calculator/symph2_jnu_plots.ipynb `jnu_cyclotron` function).
+! emissivity, from the low-temperature expansion of the Schott formula (the
+! non-relativistic, cyclotron limit).
 !
 !       j_nu(nu) = sum_{n>=1} j_n^(int) * phi_n(nu)
 !
@@ -24,7 +23,7 @@
 ! |cos theta_B| <~ sqrt(theta_e) of 90 degrees.  With the Doppler width alone the
 ! line there collapsed to a spike at n nu_c (with no overlap with the exact line
 ! at 90 degrees); the moment-matched line overlaps it by 83-92% at every angle
-! (theta_e = 1e-3 to 5e-3, harmonics 1-3; history.tex, Stage 81).
+! (theta_e = 1e-3 to 5e-3, harmonics 1-3).
 !
 ! Direction: j_n^(int) is the angle-averaged weight (total power / 4 pi).  The
 ! emission toward theta_B carries the single-particle radiation pattern of
@@ -98,8 +97,7 @@
            ! (n e theta_e/2)^n, whose successive ratio -> (e^2/2) n theta_e, so
            ! it stops decreasing at n* = 2/(e^2 theta_e) and grows without bound
            ! (overflowing to Inf) beyond it.  The true emission there is
-           ! negligible, so stop the sum at n* (history.tex, "The cyclotron branch
-           ! breaks down at high harmonics").  hybrid_emissivity only sends
+           ! negligible, so stop the sum at n*.  hybrid_emissivity only sends
            ! points with n theta_e <= 0.1 here, well below n*; the cap is a
            ! safety net for any other caller.
            nmax = min(nmax, max(1, int(2d0/(exp(2d0)*theta_e(i)))))

@@ -1,7 +1,6 @@
 ! jnu_table.f90
 !
-! Stage 4: trilinear interpolation of the precomputed emissivity lookup table
-! produced by make_jnu_table.py.
+! Interpolation of the precomputed emissivity lookup table (file layout below).
 !
 ! The exact jnu integrator is too slow for per-ray-step evaluation, so we
 ! exploit exact linearity: for a thermal (Maxwell-Juettner) plasma,
@@ -33,7 +32,7 @@
 ! Absorption is added on the fly from Kirchhoff's law (LTE):
 !       alpha_nu = j_nu / B_nu(T_e),   T_e = theta_e m_e c^2 / k_B.
 !
-! File layout (Fortran stream binary, written by make_jnu_table.py):
+! File layout (Fortran stream binary):
 !   i32 magic (0x4A4E5554 'JNUT'), i32 nx, i32 nthb, i32 nte
 !   f64 x_axis[nx], f64 thB_axis[nthb], f64 te_axis[nte]
 !   f64 logF[nx*nthb*nte]   numpy C-order flatten of logF(i_x, j_thB, k_te):
@@ -84,8 +83,8 @@
 
       ! hybrid_emissivity's dispatch.  The defaults are the cyclotron/table
       ! split alone; the APERTURE model sets all three from the fluid binary's
-      ! header (pipeline_config.THETA_HYBRID, NTHETA_MAX, THETA_SYNCH), so the
-      ! Fortran holds no copy of the pipeline's choices:
+      ! header (theta_hybrid, ntheta_max, theta_synch), so the Fortran holds no
+      ! copy of the binary writer's choices:
       !   theta_e < th_hybrid and (nu/nu_B) theta_e <= ntheta_max: cyclotron
       !   theta_e >= th_synch: thermal synchrotron fit (Leung et al. 2011)
       !   otherwise: the exact table
@@ -99,7 +98,7 @@
       ! downward between the entries, so the linear lookup is low: by 2.0-2.4%
       ! in the emission-weighted sum of relabeled 230 GHz gas (Theta_e >= 5),
       ! two thirds of it from the theta_e axis; the cubic brings that to
-      ! +0.04-0.13% (docs/history.tex, Stage 79).  Below theta_e ~ 1 the cyclotron
+      ! +0.04-0.13%.  Below theta_e ~ 1 the cyclotron
       ! harmonics make log F too rough for a cubic on this grid (it overshoots
       ! at the fundamental), so the linear lookup is kept there.  An edge
       ! interval of an axis is linear in that axis, and a neighborhood holding
@@ -203,8 +202,8 @@
                  if (.not. warned_hot) then
                     write(6,*) 'WARNING jnu_table: theta_e =', theta_e(i), ' above the table', &
                          ' maximum', te_axis(nte), '; j_nu is clamped to the edge (lower', &
-                         ' THETA_SYNCH to at most the table maximum, or extend the table:', &
-                         ' make_jnu_table.py --extend)'
+                         ' THETA_SYNCH to at most the table maximum, or extend the table''s', &
+                         ' theta_e axis)'
 !$omp atomic write
                     warned_hot = .true.
                  endif
@@ -219,7 +218,7 @@
                  if (.not. warned_cold) then
                     write(6,*) 'WARNING jnu_table: theta_e =', theta_e(i), ' below the table', &
                          ' minimum', te_axis(1), '; j_nu is clamped to the edge (extend the', &
-                         ' table: make_jnu_table.py --extend)'
+                         ' table''s theta_e axis)'
 !$omp atomic write
                     warned_cold = .true.
                  endif
@@ -404,14 +403,14 @@
         ! The thermal-synchrotron emissivity of Leung, Gammie & Noble (2011),
         ! absolutely normalized (the shape lsynch is the table's x > x_max
         ! continuation), with Kirchhoff absorption.  For theta_e >= th_synch,
-        ! where it agrees with jnu_calculator to 0.2-2% (history.tex, Stage 24):
+        ! where it agrees with the exact (table) emissivity to 0.2-2%:
         !   j = sqrt(2) pi e^2 n_e nu_s /(3 c K2(1/theta_e)) exp(lsynch(nu/nu_s)),
         !   nu_s = (2/9) nu_c theta_e^2 sin(theta_B).
         ! K2(1/theta_e) is computed (besselk2 below, to ~1e-14 relative), not
         ! approximated by 2 theta_e^2 - 1/2,
         ! which is exact at the default (fit only above the table's largest
         ! theta_e, 4.6e4) but 7.7% low at theta_e = 1 and zero (100% low) at 0.5
-        ! (review item C8, fixed 2026-10-15; history.tex, Stage 46).  Where K2 underflows (theta_e < ~1/700) the
+        ! (fixed 2026-10-15).  Where K2 underflows (theta_e < ~1/700) the
         ! point gets j = alpha = 0.
         subroutine synch_emissivity(nu, n_e, B, theta_B, theta_e, j, alpha)
         real(kind=8), dimension(:), intent(in) :: nu, n_e, B, theta_B, theta_e
@@ -471,8 +470,8 @@
         ! (the writer floors a negative theta_e to 0) go to no branch and keep
         ! j = alpha = 0.  They used to go to the table, which clamped
         ! theta_e = 0 to its smallest theta_e and gave n_e > 0 points j > 0
-        ! with alpha = 0 (emission without absorption, log F <= -60 there;
-        ! docs/muchado.md, L8-F5); the cyclotron sum's harmonic cap
+        ! with alpha = 0 (emission without absorption, log F <= -60 there);
+        ! the cyclotron sum's harmonic cap
         ! 2/(e^2 theta_e) is infinite at theta_e = 0.  A NaN n_e or theta_e
         ! still reaches the table and gives a NaN j, which the driver reports
         cyc = theta_e < th_hybrid .and. ntheta <= ntheta_max .and. n_e > 0d0 .and. theta_e > 0d0

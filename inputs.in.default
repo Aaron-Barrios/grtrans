@@ -24,7 +24,7 @@
  nmdot=1,
  mdotmin=5e+12,
  mdotmax=5e+12,
- sigcut=0.01,   ! inert for APERTURE: the sigma cut is pipeline_config.TRACE_SIGMA_CUT, carried by the binary
+ sigcut=0.01,   ! inert for APERTURE: the sigma cut is set by the binary's writer and carried by the binary
 /
 &emisdata
  ename='JNUTABLE',
@@ -58,7 +58,7 @@
  refine_max_points=2000,
 /
 &harm
- fdfile='/home/aaron/Research/Cylco-Synchrotron/aperture_fluid.bin',
+ fdfile='aperture_fluid.bin',
  fgfile='',
  fhfile='',
  fnt=1,

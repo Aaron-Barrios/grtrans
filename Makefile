@@ -192,7 +192,7 @@ libgrtrans: $(OBJ)
 	$(AR) $(ARFLAGS) libgrtrans.a $(OBJ)
 
 # depends on the libgrtrans rule (not the file libgrtrans.a, which no rule makes, so make
-# would link a stale archive; history.tex, Stage 80)
+# would link a stale archive)
 pgrtrans: libgrtrans
 	f2py -c pgrtrans.f90 --fcompiler=$(FCNAME) --f90flags="$(FFLAGS) $(OTHERFLAGS)" -m pgrtrans $(LIBS) $(OMPLIB) $(GRTRANSDIR)/libgrtrans.a
 

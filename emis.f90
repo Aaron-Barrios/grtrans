@@ -812,8 +812,7 @@
 ! returns only the TOTAL integral broadcast to every element, which made tau
 ! constant along the ray: the MAX_TAU cut in radtrans_integrate then never
 ! applied, the e^{-tau} weights of the EXTRA_QUANTS cancelled, and taudex was
-! never a photosphere index (history.tex, "The optical depth was not a running
-! integral").
+! never a photosphere index.
          integer :: k
          tau(1)=0d0
          do k=2,size(s)

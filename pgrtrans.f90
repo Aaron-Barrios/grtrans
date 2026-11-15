@@ -32,7 +32,7 @@
              use geodesics, only: initialize_pixels, geokerr_args, &
                   del_geokerr_args,initialize_geokerr_args, initialize_geo_tabs
              use chandra_tab24, only: load_chandra_tab24, del_chandra_tab24
-             use fluid_model_aperture, only: naperture
+             use fluid_model_aperture, only: naperture, aperture_slow_report, aperture_set_rout
 
 !INPUTS=====================
             integer, intent(in) :: standard,nrotype,nvals,nfreq,nmu,cflag,nt, &
@@ -63,6 +63,7 @@
             !character(len=40), intent(in) :: outfile !,ifile
             !       character(len=40) :: outfile,ifile
             integer :: nextra=0, inum, gunit, i, ncams, j, m, l, nparams, iii
+            integer :: kext_save, next_save, mufill_save
             real(kind=8) :: wtime
             type (ray_set), dimension(:), allocatable :: c
 !            real(kind=8), dimension(2,nn(1)*nn(2),nmdot*nt*nfreq*nmu), intent(out) :: ab
@@ -165,12 +166,13 @@
             fwmin,fwmax,ffmin,ffmax,frmax,fsigt,ffcol,fmdot,mbh,fnscl,fnnthscl,fnnthp,fbeta, &
             fbl06,fnp,ftp,frin,frout,fthin,fthout,fphiin,fphiout,fscalefac,sigcut)
             ! refinement statistics (refine.out) for both the standalone program
-            ! and the f2py pgrtrans path (before 2026-10-15 only the former;
-            ! docs/muchado.md, L8-F12), and the count of rays with a NaN
-            ! emissivity (L8-G4)
+            ! and the f2py pgrtrans path (before 2026-10-15 only the former), and
+            ! the count of rays with a NaN emissivity
             if (refine_on) call init_refine_stats(i2)
             nan_rays = 0
             write(6,*) 'load fluid model ',fname,spin
+            ! slow light's default tref (fluid_model_aperture.f90): the camera's r_out
+            if (fname=='APERTURE') call aperture_set_rout(1d0/uout)
             call load_fluid_model(fname,spin,fargs)
             ! several APERTURE binaries (fdfile = a '.lst' file): binary m is
             ! traced into the cameras of model parameter m, so nmdot must equal
@@ -186,7 +188,7 @@
             write(6,*) 'mu loop: ',mu0
             ! geokerr computes only the affine parameter, not t and phi, for the
             ! axisymmetric APERTURE fluid with fast light (nload = 1), unless
-            ! GRT_GEODESIC_FULL is set (muchado.md L14); lambda is unchanged bit
+            ! GRT_GEODESIC_FULL is set; lambda is unchanged bit
             ! for bit.  Other models and slow light read phi and t.  Set before
             ! any geodesic (the t0 pass of slow light too): the flag is a COMMON
             ! and outlives a call in one Python session.
@@ -197,6 +199,10 @@
                     rcut,nrotype,a1,a2,b1,b2,nro,nphi,nup)
                if(nload.gt.1) then
                   ! loop over geodesics calculating first point to get t0 for everything
+                  ! (initialize_geo_tabs zeroes kext, next and mufill for its one-point
+                  ! geodesics: restored after the pass, or every nload > 1 trace lost
+                  ! the samples geokerr adds near a radial turning point; 2026-11-01)
+                  kext_save=gargs%kext; next_save=gargs%next; mufill_save=gargs%mufill
                   gargs%nup=1
                   write(6,*) 'grtrans nload gt 1 loop',size(gargs%t0),allocated(gargs%t0),gargs%nup
                   write(6,*) 'i1 i2: ',i1,i2
@@ -214,6 +220,7 @@
                   endwhere
                   gargs%t0=gargs%t0-minval(gargs%t0)
                   gargs%nup=nup
+                  gargs%kext=kext_save; gargs%next=next_save; gargs%mufill=mufill_save
                   write(6,*) 'grtrans after init geo tabs',minval(gargs%t0),maxval(gargs%t0)
                else
                   gargs%t0=0.
@@ -237,6 +244,7 @@
                   if(l.lt.nt) call advance_fluid_timestep(fname,dt)
                enddo
                write(6,*) 'grtrans wall time elapsed: ', omp_get_wtime() - wtime
+               if (fname=='APERTURE') call aperture_slow_report()
                if (nan_rays > 0) write(6,'(a,i0,a)') ' WARNING: ', nan_rays, &
                     ' ray(s) had a NaN emissivity: pixels set to 0, NaN samples' // &
                     ' counted in extra slot 2 (with extra=1)'

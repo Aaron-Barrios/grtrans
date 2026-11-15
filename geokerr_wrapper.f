@@ -825,6 +825,7 @@ c            WRITE(6,*) 'INDEP_MUF: ',MUN,MUB,KEFF,OFFSET,DMU,NPTS,K
      *      ellquarticcomplex,elldoublecomplex,asech,muminus,iarg,qq,uplus,yy
       integer tpm,tpr,ncase
       logical pht,firstpt
+      double precision mu0m,smm
       complex*16 c(5),root(4),coefs(7),hroots(6)
       PARAMETER ( ONE=1.D0, TWO=2.D0, THIRD = 0.3333333333333333D0 )
       pi=acos(-one)
@@ -1148,29 +1149,41 @@ c Eq. (42)
           muf=muminus*cn
           if(pht) call calcimusymf(a,mneg,mpos,muf,muplus,i2mu,i3mu,rffmu2)
         else
-          muplus=sign(1.d0,mu0)*muplus
-          muminus=sign(1.d0,mu0)*sqrt(mneg)
-          if(abs(muminus).gt.abs(mu0)) then
-            muminus=mu0
+c Asymmetric roots (Q < 0, vortical orbits in one hemisphere) with mu0 < 0: solve the
+c mirror image (mu -> -mu, sm -> -sm).  With muplus, muminus and i1mu, i3mu taken
+c with the sign of mu0, the turning-point count tpm came out -1 instead of 1 (or one
+c behind for rays starting toward muplus); geophitime reads tpm as the mu0 > 0 count,
+c so lambda (and t, phi) jumped by twice the half-oscillation integral after a polar
+c turning point.  The mu0 > 0 arithmetic is unchanged (2026-10-31).
+          if(mu0.lt.0.d0) then
+            mu0m=-mu0
+            smm=-sm
+          else
+            mu0m=mu0
+            smm=sm
+          endif
+          muminus=sqrt(mneg)
+          if(muminus.gt.mu0m) then
+            muminus=mu0m
             mneg=muminus*muminus
           endif
-          if(abs(mu0).gt.abs(muplus)) then
-            muplus=mu0
+          if(mu0m.gt.muplus) then
+            muplus=mu0m
             mpos=muplus*muplus
           endif
 c          write(6,*) 'abs: ',abs(mu0)-abs(muplus),mu0-muplus,mneg,mpos
-          if(firstpt) call calcimuasym(a,mneg,mpos,mu0,muplus,i1mu,i3mu,rffmu1,rffmu3)
-          a1=sm
-          if(sm.eq.1) then
+          if(firstpt) call calcimuasym(a,mneg,mpos,mu0m,muplus,i1mu,i3mu,rffmu1,rffmu3)
+          a1=smm
+          if(smm.eq.1) then
 c Eq. (30)
             tpm=int((iu-i1mu)/i3mu)+int(abs((1+sign(1.d0,(iu-i1mu)/i3mu))/2.d0))
           else
 c Eq. (33)
             tpm=int((iu+i1mu)/i3mu)
           endif
-          a2=sm*(-one)**tpm
+          a2=smm*(-one)**tpm
 c Eq. (35)
-          a3=two*int((two*dble(tpm)+3.d0-sm)/4.d0)-one
+          a3=two*int((two*dble(tpm)+3.d0-smm)/4.d0)-one
 c Eq. (39)
           iarg=abs(a)/a2*(iu-a1*i1mu-a3*i3mu)
           uarg=abs(muplus)*iarg
@@ -1178,6 +1191,7 @@ c Eq. (39)
           call sncndn(uarg,m1,sn,cn,dn)
           muf=muminus/dn
           if(pht) call calcimuasymf(a,mneg,mpos,muf,muplus,i2mu,i3mu,rffmu2)
+          if(mu0.lt.0.d0) muf=-muf
         endif                
       endif
 c      write(6,*) 'geomu debug: ',firstpt,muminus,muplus,mneg,mpos
@@ -1711,6 +1725,7 @@ c (2.41) Carlson (1992)
 c firstpt is a boolean variable indicating if we need to calculate integrals involving only the initial and turning points.
       logical firstpt
       logical lamonly
+      double precision mu0m,mufm,smm
       common /geolam/ lamonly
       PARAMETER ( one=1.d0, two=2.d0 )
       pi=acos(-one)
@@ -2337,18 +2352,31 @@ c Eq. (45)
 c Eq. (46)
           phimu=-l*iu+l*(a1*phimu1+a2*phimu2+a3*phimu3)
        else
-c This is the asymmetric roots case
-          if(sign(1.d0,mu0).eq.-1) muplus=-muplus
+c This is the asymmetric roots case.  For mu0 < 0 the mirror image (mu -> -mu,
+c sm -> -sm, as in geomu): the t and phi integrands are even in mu, and tpm is the
+c true turning-point count (2026-10-31)
+          if(mu0.lt.0.d0) then
+            mu0m=-mu0
+            mufm=-muf
+            smm=-sm
+          else
+            mu0m=mu0
+            mufm=muf
+            smm=sm
+          endif
+          a1=smm
+          a2=smm*(-1.d0)**(tpm+1)
+          a3=2.d0*int((2*tpm-smm+1)/4.d0)
 c Protect for rounding error when mu0 is a turning point:
-          if(abs(muplus).lt.abs(mu0)) then
-            muplus=mu0
+          if(muplus.lt.mu0m) then
+            muplus=mu0m
             mpos=muplus*muplus
           endif
-          if(abs(mneg).gt.mu0*mu0) then
-            mneg=mu0*mu0
+          if(abs(mneg).gt.mu0m*mu0m) then
+            mneg=mu0m*mu0m
           endif
 c Calculate phi, t mu component integrals:
-          call calcphitmuasym(a,mneg,mpos,mu0,muf,muplus,phimu1,phimu2,phimu3,tmu1,
+          call calcphitmuasym(a,mneg,mpos,mu0m,mufm,muplus,phimu1,phimu2,phimu3,tmu1,
      &                        tmu2,tmu3,rffmu1,rffmu2,rffmu3,rdc,rjc,firstpt)
 c Eq. (45)
           tmu=(a1*tmu1+a2*tmu2+a3*tmu3)
