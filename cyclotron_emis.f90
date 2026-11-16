@@ -37,9 +37,7 @@
 ! (2n+1)! cancel:
 !       j_n^(int) D_n = (2 pi n_e e^2 nu_c^2 / c) n^(2n+2) theta_e^n / (2^n n!)
 !                       * sin^(2n-2)(theta_B) (1 + cos^2 theta_B),
-! so the sum needs log(n!) only, one log_gamma per point and a recurrence in n
-! (until 2026-10-27, five log_gamma calls per harmonic; the same values to
-! ~1e-14).
+! so the sum needs log(n!) only, one log_gamma per point and a recurrence in n.
 !
 ! Absorption is added from Kirchhoff's law (valid for a thermal, isotropic
 ! Maxwellian distribution -- which is our case):

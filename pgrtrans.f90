@@ -166,7 +166,7 @@
             fwmin,fwmax,ffmin,ffmax,frmax,fsigt,ffcol,fmdot,mbh,fnscl,fnnthscl,fnnthp,fbeta, &
             fbl06,fnp,ftp,frin,frout,fthin,fthout,fphiin,fphiout,fscalefac,sigcut)
             ! refinement statistics (refine.out) for both the standalone program
-            ! and the f2py pgrtrans path (before 2026-10-15 only the former), and
+            ! and the f2py pgrtrans path, and
             ! the count of rays with a NaN emissivity
             if (refine_on) call init_refine_stats(i2)
             nan_rays = 0
@@ -200,8 +200,8 @@
                if(nload.gt.1) then
                   ! loop over geodesics calculating first point to get t0 for everything
                   ! (initialize_geo_tabs zeroes kext, next and mufill for its one-point
-                  ! geodesics: restored after the pass, or every nload > 1 trace lost
-                  ! the samples geokerr adds near a radial turning point; 2026-11-01)
+                  ! geodesics: restored after the pass, or every nload > 1 trace would
+                  ! lose the samples geokerr adds near a radial turning point)
                   kext_save=gargs%kext; next_save=gargs%next; mufill_save=gargs%mufill
                   gargs%nup=1
                   write(6,*) 'grtrans nload gt 1 loop',size(gargs%t0),allocated(gargs%t0),gargs%nup

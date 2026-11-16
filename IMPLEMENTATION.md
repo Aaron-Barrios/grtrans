@@ -142,7 +142,7 @@ lies exactly at `uout`, at a turning point or at the horizon.
   (`geokerr_wrapper.f:3776-3803`, set by `pgrtrans.f90:193` before the
   $\mu$ loop and so before any geodesic), in which `GEOPHITIME` skips the elliptic integrals of the third kind
   (Carlson $R_J$, $R_C$) that only $\phi$ and $t$ need and computes $\lambda$
-  from the first- and second-kind ones exactly as before. The APERTURE fluid
+  from the first- and second-kind ones exactly as the full mode does. The APERTURE fluid
   is axisymmetric and the traces use fast light, so nothing reads $\phi$ or
   $t$ but extra slot 9 (emission-weighted $\phi$), which the pipeline does not
   store. Images and stored extras are bit-identical to the full geodesic; a
@@ -198,7 +198,7 @@ given in the header of `fluid_model_aperture.f90`.
 - **Geometric masks** (writer options: a polar cone and a maximum emitting
   radius): cells within the polar cone or
   beyond the radius are written with $n_e=\Theta_e=0$, so they neither emit
-  nor absorb (cell-level, in either mode). Defaults since 2026-10-16: no cone
+  nor absorb (cell-level, in either mode). Defaults: no cone
   (with the σ cut at 0.5 no cone of 0.25–4° removed any light) and
   $r_{\max}=80\,r_g$, which leaves out the run's damping layer ($r>79.9$,
   numerical gas; up to 2.4% of a $d=8$ image, more at $d=2$).
@@ -208,7 +208,7 @@ given in the header of `fluid_model_aperture.f90`.
 
 ### Several binaries in one run
 
-Added 2026-10-15. A pixel's geodesic depends only
+A pixel's geodesic depends only
 on the camera, `nn` and the spin, so one run can trace many binaries along the
 same paths, through grtrans's existing loop over model parameters (one
 parameter per `mdot`, which APERTURE does not use):
@@ -217,7 +217,7 @@ parameter per `mdot`, which APERTURE does not use):
   per line (up to 1023 characters; blank lines and `#` lines skipped;
   `read_binary_list`, `fluid_model_aperture.f90:246-281`), and `nmdot` must
   equal their number (`pgrtrans.f90:178-182` stops otherwise). Any other
-  `fdfile` is one binary, as before.
+  `fdfile` is one binary.
 - **Storage.** `read_aperture_data` (`:208-242`) reads every binary into its
   own `aperture_bin` (`:65-95`; the array `abins`, `:110`), with its own grid,
   $\lambda_u$, mass ratio and σ cut (cell or per sample). Every binary's spin
@@ -238,8 +238,7 @@ parameter per `mdot`, which APERTURE does not use):
   so it is exactly a single-binary trace of binary $m$. With one binary
   nothing changes (`multibin` is false).
 - **Output.** One block per binary in `grtrans.out`, in list order (§11).
-- **Check** (2026-10-15): single-binary images are bit for
-  bit those of the build before; each block of a 9-binary run (dumps 250, 500,
+- **Check** (2026-10-15): each block of a 9-binary run (dumps 250, 500,
   1000 × $R_{\rm high}$ 1, 100 at $d=4$; $d=2$; a per-cell binary; the $d=1$
   pair-plasma binary) is bit for bit the separate trace, with extras and with
   refinement, at 1 and 24 threads. Time at 3200 samples: 9 binaries at
@@ -274,8 +273,7 @@ the ray:
 3. **Cell and weights:** on each axis the interval from the axis's mean step
    (the axes are uniform in $\ln r$ and $\theta$ up to rounding), moved to the
    one that holds the point: the same interval as bisection, in $O(1)$
-   (`grid_interval`, `:304-322`, called at `:404-405`; bisection until
-   2026-10-27), weights linear in $\ln r$ and $\theta$ (`:406-417`): bilinear
+   (`grid_interval`, `:304-322`, called at `:404-405`), weights linear in $\ln r$ and $\theta$ (`:406-417`): bilinear
    interpolation between the four surrounding cell centers.
 4. **Interpolated:** $n_e$ (`:419`); $\beta_p$ and $\sigma$ over the corners
    that hold fluid ($\sigma>0$), renormalized, as the cut of step 5 tests
@@ -289,10 +287,9 @@ the ray:
    density-weighted interpolation (`:462-465`).
 7. **Velocity and field:** $u^\mu$ as the electron current over the density,
    $\sum w\,n_eu^\mu/\sum w\,n_e$, so the velocity is the electrons' mean as
-   $\Theta_e$ is their mean temperature (`:467-472`; since 2026-10-27:
-   $u^\mu$ itself had been interpolated, and at a sample
-   97% of the weight on a nearly empty cell gave a dense hot neighbor's
-   electrons its $\Gamma=5.6$); $b^\mu$ component by component (`:474-477`),
+   $\Theta_e$ is their mean temperature (`:467-472`; interpolating $u^\mu$
+   itself would give a dense hot cell's electrons the velocity of a nearly
+   empty neighbor); $b^\mu$ component by component (`:474-477`),
    Kerr–Schild. There is no validity gate: empty and cut cells contribute 0 to
    $n_e$, $n_e\Theta_e$ and $n_eu^\mu$ but keep their $b$ (comment, `:338-342`).
 8. **To Boyer–Lindquist** (`uks2ubl`, `kerr.f90:131-144`; `:483-488`, the metric
@@ -332,15 +329,15 @@ interpolated σ at each step removes most of them, which is why ipole cuts
 per sample.
 
 The pipeline therefore uses ipole's form (the writer's `"point"` mode,
-the default since 2026-10-15): the per-cell σ is interpolated to each sample
+the default): the per-cell σ is interpolated to each sample
 (over the corners that hold particles: a particle-free cell is sparse
 sampling, not vacuum) and the sample is left empty above the cut. It is the
 convention of most EHT model images; it needs nothing the binary lacks;
 forming $b^2/\rho$ from interpolated fields instead (grtrans, RAPTOR) lets
 the dense side of an edge dominate and treats our particle-free cells
 almost as vacuum (it would mask the samples beside 11–20% of the emitting
-cells at $d=1$). The per-cell cut (`"cell"`, the
-images traced before 2026-10-15) is ipole's abandoned form. At
+cells at $d=1$). The per-cell cut (`"cell"`) is
+ipole's abandoned form. At
 $R_{\rm high}\le5$ the choice moves the 230 GHz flux by at most 4% and the
 cut's value (0.25–2.5) by about 10%; at $R_{\rm high}=100$, where the light
 sits at the mask edge, by factors (§14).
@@ -732,13 +729,12 @@ they do; the files are given as citations.
   light's $t_0$ pass).
 - **A geokerr fix for vortical rays seen from below the equator.** For $\mu_0<0$
   in the asymmetric-roots case ($Q<0$, orbits that stay in one hemisphere),
-  `GEOMU` counted the polar turning point as `tpm` $=-1$ (its integrals carried
-  the sign of $\mu_0$), and `GEOPHITIME` read that as the $\mu_0>0$ count, so
-  $\lambda$ jumped by twice the half-oscillation integral after the turning point.
-  Both now solve the mirror image ($\mu\to-\mu$, `sm` → −`sm`; the $\mu$ equation
-  and the $t$, $\phi$ integrands are even in $\mu$), and $\mu_0\ge0$ runs the same
-  arithmetic as before. Found as one ray of a $\mu_0<0$ image with $\tau<0$;
-  checked against the Mino-time value $\Sigma\,|\Delta r|/\sqrt{R}$ of every step
+  geokerr's `GEOMU` counts the polar turning point as `tpm` $=-1$ (its integrals
+  carry the sign of $\mu_0$), and `GEOPHITIME` reads that as the $\mu_0>0$ count,
+  so $\lambda$ would jump by twice the half-oscillation integral after the turning
+  point. Here both solve the mirror image ($\mu\to-\mu$, `sm` → −`sm`; the $\mu$
+  equation and the $t$, $\phi$ integrands are even in $\mu$), and $\mu_0\ge0$ runs
+  geokerr's own arithmetic. Checked against the Mino-time value $\Sigma\,|\Delta r|/\sqrt{R}$ of every step
   (`geokerr_wrapper.f`).
 - **Slow light for the APERTURE fluid.** A `.lst` whose lines are `path t` (with a
   `tframe <t>` line and an optional `tref <L>` line) loads time slices of one
@@ -753,15 +749,15 @@ they do; the files are given as citations.
   `aperture_set_rout` called from `pgrtrans.f90`).
 - **A fix to grtrans's own slow-light setup.** The $t_0$ pass of `nload` > 1 zeroes
   geokerr's `kext`, `next` and `mufill` for its one-point geodesics
-  (`initialize_geo_tabs`), and they were never restored, so every slow-light
-  trace, of any fluid model, lost geokerr's extra samples near a radial turning
-  point. They are now restored after the pass (`pgrtrans.f90`).
+  (`initialize_geo_tabs`), and stock grtrans never restores them, so every
+  slow-light trace, of any fluid model, would lose geokerr's extra samples near a
+  radial turning point. Here they are restored after the pass (`pgrtrans.f90`).
 - **More outputs and safer ones.** Slot 1 holds the total $\tau$; slots 20 and 21
   the emission-weighted $\beta_p$ and $\sigma$, so `nextra` is 21 (7 still if
   `nup=1`); guards in the extras against 0/0; rays with a NaN emissivity are
   counted, reported and flagged in slot 2; `nvals=4` with a Stokes-I-only
-  emissivity stops (`grtrans_driver.f90`, `rad_trans.f90`, `pgrtrans.f90`, where
-  the NaN-ray summary moved from `grtrans.f90` on 2026-10-15).
+  emissivity stops (`grtrans_driver.f90`, `rad_trans.f90`, `pgrtrans.f90`, which
+  prints the NaN-ray summary).
 - **Constants and build.** CODATA 2018 constants, $M_\odot=1.98841\times10^{33}$ g
   (`phys_constants.f90`); no-op FITS stubs instead of cfitsio (`fits.f90`, and the
   `Makefile` without `-lcfitsio`, with the new objects); longer file names
@@ -774,12 +770,5 @@ they do; the files are given as citations.
 
 ## 16. Known problems
 
-No grtrans problem is known to be open. The ones this guide has covered are
-fixed or closed: the cyclotron line width near $90^\circ$ (§8), the table's
-floor (no effect; §8), the no-emission box (§6), the NaN flag of extra
-slot 2 (§11, §12), the extra slots averaging empty corners as zero (§6),
-stack use (§13), and the fixes of 2026-10-15 (refinement's harmonic test
-reading $\Theta_e$ for APERTURE, §10; no emissivity branch for $n_e\le0$ or
-$\Theta_e\le0$ and the exact $K_2$ of the synchrotron fit, §8; the guarded
-extra slots, §11; the `nvals=4` stop and thread-safe warning flags, §8, §13;
-the spin check, §5; `refine.out` from `pgrtrans`, §10).
+No grtrans problem is known to be open; the ones found and fixed are in
+`docs/history.tex`.

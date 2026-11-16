@@ -37,11 +37,8 @@
 !   f64 x_axis[nx], f64 thB_axis[nthb], f64 te_axis[nte]
 !   f64 logF[nx*nthb*nte]   numpy C-order flatten of logF(i_x, j_thB, k_te):
 !                           offset (0-based) = (i*nthb + j)*nte + k
-!                           i.e. x SLOWEST, theta_e FASTEST.  (2026-09-23: the
-!                           indexing below was transposed relative to this --
-!                           it assumed x fastest -- and has been corrected to
-!                           match the bytes; verified against the jnu binary:
-!                           0.46 dex median |dlog10 F| after, 34.8 dex before.)
+!                           i.e. x SLOWEST, theta_e FASTEST, as the indexing
+!                           below reads it (verified against the jnu binary).
 
       module jnu_table
 
@@ -409,8 +406,8 @@
         ! K2(1/theta_e) is computed (besselk2 below, to ~1e-14 relative), not
         ! approximated by 2 theta_e^2 - 1/2,
         ! which is exact at the default (fit only above the table's largest
-        ! theta_e, 4.6e4) but 7.7% low at theta_e = 1 and zero (100% low) at 0.5
-        ! (fixed 2026-10-15).  Where K2 underflows (theta_e < ~1/700) the
+        ! theta_e, 4.6e4) but 7.7% low at theta_e = 1 and zero (100% low) at 0.5.
+        ! Where K2 underflows (theta_e < ~1/700) the
         ! point gets j = alpha = 0.
         subroutine synch_emissivity(nu, n_e, B, theta_B, theta_e, j, alpha)
         real(kind=8), dimension(:), intent(in) :: nu, n_e, B, theta_B, theta_e
@@ -468,8 +465,8 @@
         endwhere
         ! Points with n_e <= 0 (electron-free or sigma-cut cells) or theta_e <= 0
         ! (the writer floors a negative theta_e to 0) go to no branch and keep
-        ! j = alpha = 0.  They used to go to the table, which clamped
-        ! theta_e = 0 to its smallest theta_e and gave n_e > 0 points j > 0
+        ! j = alpha = 0.  The table would clamp
+        ! theta_e = 0 to its smallest theta_e and give n_e > 0 points j > 0
         ! with alpha = 0 (emission without absorption, log F <= -60 there);
         ! the cyclotron sum's harmonic cap
         ! 2/(e^2 theta_e) is infinite at theta_e = 0.  A NaN n_e or theta_e

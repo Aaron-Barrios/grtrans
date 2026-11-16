@@ -18,11 +18,11 @@
     integer(kind=4) :: maxsteps = 100000
     integer, dimension(4) :: stats
     ! oatol: LSODA absolute tolerance on the fac-normalized intensity (of order
-    ! 1e-6..1e-2 for an emitting ray).  1d-8 was above the normalized intensity
-    ! in optically thick gas, so LSODA accepted steps whose error exceeded the
-    ! answer (optically thick images came out too dim); 1d-30 could not be met where emission switches on abruptly while
-    ! I is still ~0, so LSODA ran out of steps and the pixel was set to 0.
-    ! 1d-12 does neither.
+    ! 1e-6..1e-2 for an emitting ray).  1d-8 is above the normalized intensity
+    ! in optically thick gas, so LSODA would accept steps whose error exceeds the
+    ! answer (optically thick images too dim); 1d-30 cannot be met where emission
+    ! switches on abruptly while I is still ~0, so LSODA would run out of steps
+    ! and the pixel be set to 0.  1d-12 does neither.
     real(kind=8) :: ortol = 1d-6, oatol = 1d-12, hmax = 10, MAX_TAU, MAX_TAU_DEFAULT = 10d0, thin = 1d-2, sphtolfac=1d0
     ! explin sub-steps an interval of optical depth > EXPLIN_DTAU_SUB, with j
     ! and K linear in s inside it (see radtrans_integrate_explin)
@@ -99,7 +99,7 @@
         if(present(oa)) then
            oatol = oa
         else
-           oatol = 1d-12   ! was 1d-8, then 1d-30; see the declaration above
+           oatol = 1d-12   ! see the declaration above
         endif
         if(present(th)) then
            thin = th

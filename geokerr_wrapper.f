@@ -1151,10 +1151,10 @@ c Eq. (42)
         else
 c Asymmetric roots (Q < 0, vortical orbits in one hemisphere) with mu0 < 0: solve the
 c mirror image (mu -> -mu, sm -> -sm).  With muplus, muminus and i1mu, i3mu taken
-c with the sign of mu0, the turning-point count tpm came out -1 instead of 1 (or one
+c with the sign of mu0, the turning-point count tpm would be -1 instead of 1 (or one
 c behind for rays starting toward muplus); geophitime reads tpm as the mu0 > 0 count,
-c so lambda (and t, phi) jumped by twice the half-oscillation integral after a polar
-c turning point.  The mu0 > 0 arithmetic is unchanged (2026-10-31).
+c so lambda (and t, phi) would jump by twice the half-oscillation integral after a
+c polar turning point.  The mu0 > 0 arithmetic is geokerr's own.
           if(mu0.lt.0.d0) then
             mu0m=-mu0
             smm=-sm
@@ -2354,7 +2354,7 @@ c Eq. (46)
        else
 c This is the asymmetric roots case.  For mu0 < 0 the mirror image (mu -> -mu,
 c sm -> -sm, as in geomu): the t and phi integrands are even in mu, and tpm is the
-c true turning-point count (2026-10-31)
+c true turning-point count
           if(mu0.lt.0.d0) then
             mu0m=-mu0
             mufm=-muf

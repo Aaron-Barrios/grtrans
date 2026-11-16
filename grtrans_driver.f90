@@ -327,7 +327,7 @@
 !                           write(6,*) 'rtau', size(r%tau),size(r%tau(7:7))
 !                           write(6,*) 'tsum: ',tsum(g%lambda(1:taudex),dummy(1:taudex))
 !                           write(6,*) 'tsum: ',tsum(g%lambda(1:taudex),dummy(1:taudex)*g%x(1:taudex)%data(2))
-! Slots 7-14 and 20-21 in ONE pass over the ray (2026-10-17).  Each slot is <q> = int(w q dlambda) / int(w dlambda) with the
+! Slots 7-14 and 20-21 in ONE pass over the ray.  Each slot is <q> = int(w q dlambda) / int(w dlambda) with the
 ! weight w = j exp(-tau); the trapezoid rule makes either integral
 ! sum_i c_i y_i with c_i half the sum of the two neighboring steps of lambda,
 ! so one loop accumulates all the numerators and the denominator.  Until then
@@ -624,8 +624,8 @@
          n0=g%npts
          ! the cubic of refine_eval_points needs four points (i0 = n0-3 >= 1)
          if (n0 < 4) return
-         cap=n0+refine_max_points        ! points ADDED per ray (was max(refine_max_points,n0),
-                                         ! which left no room once nn(3) > refine_max_points)
+         cap=n0+refine_max_points        ! points ADDED per ray, so there is room
+                                         ! even when nn(3) > refine_max_points
          allocate(lam(cap),jv(cap),kv(cap),tv(cap),cold(cap),bix(cap),act(cap))
          allocate(hv(n0))
          n=n0
@@ -777,9 +777,9 @@
 ! floor(nu/nu_c) with nu_c = eB/(2 pi m c), or -1 where the harmonics overlap
 ! (n > 2/(e^2 Theta_e), the cap of cyclotron_emis.f90) or B = 0.
 ! tcgs is the temperature in kelvin, or already Theta_e when tdimless (the
-! APERTURE model, convert_fluidvars_aperture).  Before 2026-10-15 it was
-! always read as kelvin, so for APERTURE n* ~ 1.6e9/Theta_e and every change
-! of floor(nu/nu_c) triggered a split.
+! APERTURE model, convert_fluidvars_aperture); read as kelvin, Theta_e would
+! give n* ~ 1.6e9/Theta_e and every change of floor(nu/nu_c) would trigger a
+! split.
          real(kind=8), dimension(:), intent(in) :: nu,bcgs,tcgs
          logical, intent(in) :: tdimless
          real(kind=8), dimension(size(nu)) :: h

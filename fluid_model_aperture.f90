@@ -20,16 +20,15 @@
 !     skipped when reading; aperture_vals takes |b| from the interpolated b^mu
 !     (see below).
 !   * u^mu is the electrons' mean velocity: the electron current n_e u^mu is
-!     interpolated and divided by the interpolated n_e (since 2026-10-27;
-!     before, u^mu itself was interpolated, and a hot dense cell's electrons
-!     could take the velocity of a nearly empty neighbor: one pixel came out
-!     Doppler-boosted by g = 3.6).
+!     interpolated and divided by the interpolated n_e (interpolating u^mu
+!     itself would let a hot dense cell's electrons take the velocity of a
+!     nearly empty neighbor).
 !   * Interpolated u^mu is renormalized to u.u = -1 and b^mu projected
 !     orthogonal to it.  A weighted average of unit timelike vectors pointing
 !     in different directions is not a unit vector (|u.u| > 1), so bilinear
 !     interpolation alone gives a wrong u^t and hence a wrong Doppler factor:
 !     averaged over 2x2 cells, 11-13% of the points in the late dumps had
-!     |u.u + 1| > 0.1.  Since 2026-10-10 |b| is taken from the
+!     |u.u + 1| > 0.1.  |b| is taken from the
 !     interpolated, projected b^mu (Aperture interpolates field components),
 !     and theta_e as <n_e theta_e>/<n_e> (see aperture_vals); the binary's
 !     bmag array is skipped.
@@ -56,16 +55,15 @@
 !     aperture_vals applies sigma_cut at each ray sample (point_sigcut).
 !   * The camera spin (grtrans's &geodata spin) must equal the spin the fluid
 !     was reconstructed with (the header's asim, i.e. this binary's own spin):
-!     a mismatch stops grtrans (initialize_aperture_model; it only warned
-!     before 2026-10-15).
-!   * Several binaries in one run (2026-10-15): &harm fdfile naming a '.lst'
+!     a mismatch stops grtrans (initialize_aperture_model).
+!   * Several binaries in one run: &harm fdfile naming a '.lst'
 !     file (one binary path per line) loads every binary listed into abins;
 !     with nmdot equal to their number, grtrans_driver traces binary m along
 !     the same ray paths into the cameras of model parameter m (one geodesic
 !     per pixel for all of them).  The binaries may have different grids, lambda_u, mass ratios
 !     and sigma cuts, but must share the spin (the camera's) and the
-!     emissivity dispatch.  A single binary behaves as before.
-!   * Slow light (2026-11-01): when the lines of the '.lst' carry a time
+!     emissivity dispatch.  A plain binary path traces that one binary.
+!   * Slow light: when the lines of the '.lst' carry a time
 !     after the path ("path t", that binary's simulation time in M, i.e.
 !     r_g/c, in increasing order), the binaries are time slices of ONE fluid,
 !     not separate models.  A line "tframe <t>" (required) sets the frame's
@@ -521,7 +519,7 @@
            ! beyond the grid there is no fluid; between the outermost cell
            ! centers and the grid's edge (the half cell at the axis and at the
            ! inner and outer radii) the edge cell's values hold, as inside a
-           ! cell (until 2026-10-22 those points got nothing).
+           ! cell.
            ! Only the interpolation uses the clamped position; the metric
            ! below uses the true one.
            if (rq < rlo .or. rq > rhi .or. thq < thlo .or. thq > thhi) then
@@ -548,7 +546,6 @@
            ! beta_p and sigma (extra slots 20, 21) from the corners that hold
            ! fluid (sigma_arr > 0), renormalized, as the per-sample sigma cut
            ! below tests it: an empty cell is sparse sampling, not a zero
-           ! (until 2026-10-19 empty corners counted as 0)
            sw = 0d0; ss = 0d0; bs = 0d0
            if (sigma_arr(k00) > 0d0) then
               sw = sw + w00; ss = ss + w00*sigma_arr(k00); bs = bs + w00*beta_arr(k00)
